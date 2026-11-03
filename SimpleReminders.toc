@@ -1,0 +1,24 @@
+## Interface: 16001
+## Title: Simple Reminders
+## Notes: Reminders by countdown, time of day or zone, sent as a whisper, a chat line or a raid warning.
+## Author: miyanko
+## Version: 1.0.0
+## Category: Miscellaneous
+## IconTexture: Interface\Icons\INV_Misc_Bell_01
+## SavedVariables: SimpleRemindersDB
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\LibNativeUI-1.0\LibNativeUI-1.0.lua
+
+Core\Init.lua
+Core\Time.lua
+Core\Reminders.lua
+Core\Commands.lua
+
+UI\Panel.lua
+UI\MinimapButton.lua
+
+Bootstrap.lua

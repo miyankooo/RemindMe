@@ -1,0 +1,7 @@
+package-as: SimpleReminders
+manual-changelog: CHANGELOG.md
+
+ignore:
+  - CLAUDE.md
+  - Tests
+  - Tools
