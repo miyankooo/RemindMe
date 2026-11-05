@@ -5,6 +5,7 @@
 ## Version: @project-version@
 ## Category: Miscellaneous
 ## IconTexture: Interface\Icons\INV_Misc_Bell_01
+## X-Curse-Project-ID: 1786009
 ## SavedVariables: RemindMeDB
 
 Libs\LibStub\LibStub.lua
