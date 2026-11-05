@@ -1,7 +1,10 @@
 package-as: SimpleReminders
-manual-changelog: CHANGELOG.md
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
 
 ignore:
-  - CLAUDE.md
   - Tests
   - Tools
+  - release-please-config.json

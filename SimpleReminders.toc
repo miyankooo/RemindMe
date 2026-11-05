@@ -2,7 +2,7 @@
 ## Title: Simple Reminders
 ## Notes: Reminders by countdown, time of day or zone, sent as a whisper, a chat line or a raid warning.
 ## Author: miyanko
-## Version: 1.0.0
+## Version: @project-version@
 ## Category: Miscellaneous
 ## IconTexture: Interface\Icons\INV_Misc_Bell_01
 ## SavedVariables: SimpleRemindersDB
