@@ -1,5 +1,5 @@
 ## Interface: 16001
-## Title: Remind Me
+## Title: Remind Me Later
 ## Notes: Reminders by countdown, time of day or zone, sent as a whisper, a chat line or a raid warning.
 ## Author: miyanko
 ## Version: @project-version@

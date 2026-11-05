@@ -2,7 +2,7 @@ local _, ns = ...
 
 -- Spaced name for everything the player reads: the window title, the chat prefix and the
 -- launcher, whose LibDataBroker name it also is.
-ns.TITLE = "Remind Me"
+ns.TITLE = "Remind Me Later"
 
 -- The bell from the toc's IconTexture, file 133706.
 ns.ICON = "Interface\\Icons\\INV_Misc_Bell_01"

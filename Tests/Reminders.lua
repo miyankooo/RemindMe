@@ -279,19 +279,19 @@ check("Add refuses empty zone", select(2, Reminders.Add({ kind = "zone", zone = 
 tick(59)
 check("not due early", #db.reminders == 1 and #chat == 0)
 tick(1)
-check("whisper delivered", last() == "[Remind Me] whispers: Tea" and sounds[1] == SOUNDKIT.TELL_MESSAGE)
+check("whisper delivered", last() == "[Remind Me Later] whispers: Tea" and sounds[1] == SOUNDKIT.TELL_MESSAGE)
 check("one-time removed after firing", #db.reminders == 0)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 30, text = "Stretch", output = "print", rep = true })
 tick(30)
-check("system line delivered", last() == "[Remind Me]: Stretch")
+check("system line delivered", last() == "[Remind Me Later]: Stretch")
 check("repeating timer restarts", #db.reminders == 1 and db.reminders[1].due == NOW + 60)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 5, text = "Pull {star}", output = "warning" })
 tick(5)
-check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and last() == "[Remind Me]: Pull {star}")
+check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and last() == "[Remind Me Later]: Pull {star}")
 check("warning plays the raid warning sound", sounds[1] == SOUNDKIT.RAID_WARNING)
 
 reset()
@@ -311,7 +311,7 @@ world.zone, world.subzone = "Elwynn Forest", ""
 fire(events, "ZONE_CHANGED_NEW_AREA")
 world.zone, world.subzone = "Stormwind City", "Cathedral Square"
 fire(events, "ZONE_CHANGED_NEW_AREA")
-check("entering fires, partial name matches", last() == "[Remind Me]: Reagents")
+check("entering fires, partial name matches", last() == "[Remind Me Later]: Reagents")
 fire(events, "ZONE_CHANGED")
 check("moving inside the zone does not fire again", #chat == 1)
 world.zone = ""
@@ -330,7 +330,7 @@ world.zone, world.subzone = "Ironforge", "The Commons"
 Reminders.Add({ kind = "zone", zone = "Trade District", text = "Sell", output = "print" })
 world.subzone = "Trade District"
 fire(events, "ZONE_CHANGED")
-check("subzone match fires once and removes a one-time reminder", last() == "[Remind Me]: Sell" and #db.reminders == 0)
+check("subzone match fires once and removes a one-time reminder", last() == "[Remind Me Later]: Sell" and #db.reminders == 0)
 
 -- === catch-up at login ===
 reset()
@@ -395,7 +395,7 @@ slash("in 5m Second")
 slash("list")
 check("/rm list sorts by due time", chat[#chat - 1]:find("^1%. Second") and last():find("^2%. First"))
 slash("test 1")
-check("/rm test shows without removing", last() == "[Remind Me] whispers: Second" and #db.reminders == 2)
+check("/rm test shows without removing", last() == "[Remind Me Later] whispers: Second" and #db.reminders == 2)
 slash("remove 1")
 check("/rm remove takes the list number", #db.reminders == 1 and db.reminders[1].text == "First")
 slash("remove 9")

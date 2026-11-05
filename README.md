@@ -1,6 +1,6 @@
 <img src="https://raw.githubusercontent.com/miyankooo/RemindMe/main/.github/icon.png" width="64" height="64" alt="">
 
-# Remind Me
+# Remind Me Later
 
 A WoW Forever addon that reminds you of anything by countdown, time of day or zone. Reminders arrive as a whisper, a chat line or a raid warning, and only you see them.
 
