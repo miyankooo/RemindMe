@@ -43,9 +43,9 @@ for wday, name in ipairs(CALENDAR_WEEKDAY_NAMES) do
 end
 
 local USAGE = {
-    timer = "/sr in 30m <text>",
-    clock = "/sr at 20:30 <text>",
-    zone = "/sr zone Stormwind City: <text>",
+    timer = "/rm in 30m <text>",
+    clock = "/rm at 20:30 <text>",
+    zone = "/rm zone Stormwind City: <text>",
 }
 
 -- Reads the options after the trigger, then the text, and stores the reminder.
@@ -55,7 +55,7 @@ local function addFrom(spec, words, i)
         i = i + 1
     end
     if spec.kind ~= "clock" and type(spec.rep) == "number" then
-        say("Weekdays work only with /sr at.")
+        say("Weekdays work only with /rm at.")
         return
     end
     spec.text = table.concat(words, " ", i)
@@ -105,7 +105,7 @@ end
 local function list()
     local sorted = Reminders.Sorted()
     if #sorted == 0 then
-        say("No reminders. Type /sr to add one.")
+        say("No reminders. Type /rm to add one.")
         return
     end
     local now = GetServerTime()
@@ -115,12 +115,12 @@ local function list()
     end
 end
 
--- The reminder at a number /sr list shows, or nil after saying why.
+-- The reminder at a number /rm list shows, or nil after saying why.
 local function pick(word)
     local sorted = Reminders.Sorted()
     local r = sorted[tonumber(word or "")]
     if not r then
-        say(#sorted == 0 and "No reminders." or "Pick a number from /sr list, such as /sr remove 1.")
+        say(#sorted == 0 and "No reminders." or "Pick a number from /rm list, such as /rm remove 1.")
     end
     return r
 end
@@ -148,17 +148,17 @@ end
 
 -- Each command with what it does, in the order a new player needs them.
 local HELP = {
-    { "/sr", "opens or closes the window." },
-    { "/sr in 30m <text>", "reminds you after a countdown, such as 90s, 45m or 1h 30m." },
-    { "/sr at 20:30 <text>", "reminds you at a time of day, such as 8:30pm." },
-    { "/sr zone Stormwind City: <text>", "reminds you when you enter a zone." },
-    { "/sr here <text>", "reminds you when you come back to the zone you are in." },
-    { "Options", "go before the text: whisper, print or warning, repeat, and for /sr at realm or local, daily or a weekday such as monday." },
-    { "/sr at 19:45 warning monday Raid tonight", "warns you every Monday." },
-    { "/sr list", "lists your reminders with numbers." },
-    { "/sr remove 2", "removes reminder 2. /sr test 2 shows it once now." },
-    { "/sr clear", "removes every reminder." },
-    { "/sr minimap", "hides or shows the minimap button." },
+    { "/rm", "opens or closes the window." },
+    { "/rm in 30m <text>", "reminds you after a countdown, such as 90s, 45m or 1h 30m." },
+    { "/rm at 20:30 <text>", "reminds you at a time of day, such as 8:30pm." },
+    { "/rm zone Stormwind City: <text>", "reminds you when you enter a zone." },
+    { "/rm here <text>", "reminds you when you come back to the zone you are in." },
+    { "Options", "go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or a weekday such as monday." },
+    { "/rm at 19:45 warning monday Raid tonight", "warns you every Monday." },
+    { "/rm list", "lists your reminders with numbers." },
+    { "/rm remove 2", "removes reminder 2. /rm test 2 shows it once now." },
+    { "/rm clear", "removes every reminder." },
+    { "/rm minimap", "hides or shows the minimap button." },
 }
 
 local function help()
@@ -168,7 +168,7 @@ local function help()
     end
 end
 
--- A bare /sr toggles the window, the first word picks the command.
+-- A bare /rm toggles the window, the first word picks the command.
 local function handleSlash(msg)
     local raw = ns.trim(msg)
     local words = ns.words(raw)
@@ -197,8 +197,8 @@ local function handleSlash(msg)
     elseif command == "help" or command == "?" then
         help()
     else
-        say("Unknown command. Type /sr help for the list.")
+        say("Unknown command. Type /rm help for the list.")
     end
 end
 
-UI.RegisterSlash("SIMPLEREMINDERS", { "/simplereminders", "/sr" }, handleSlash)
+UI.RegisterSlash("REMINDME", { "/remindme", "/rm", "/sr" }, handleSlash)

@@ -151,8 +151,8 @@ end
 
 local function buildPanel()
     local frame = UI.CreateWindow({
-        name = "SimpleRemindersFrame", title = ns.TITLE, icon = ns.ICON,
-        width = PANEL_W, height = PANEL_H, position = SimpleRemindersDB.window, attic = false,
+        name = "RemindMeFrame", title = ns.TITLE, icon = ns.ICON,
+        width = PANEL_W, height = PANEL_H, position = RemindMeDB.window, attic = false,
     })
     local left, right = createColumns(frame)
 
@@ -309,7 +309,7 @@ local function buildPanel()
         self:RefreshTimes()
     end
 
-    -- The same checks as /sr, top to bottom, so the first field to fix gets the caret. The picks
+    -- The same checks as /rm, top to bottom, so the first field to fix gets the caret. The picks
     -- stay after adding, so several similar reminders go in quickly.
     function frame:AddFromForm()
         local spec = { kind = form.kind, output = form.output, rep = form.rep, text = textBox:GetText() }
@@ -412,7 +412,7 @@ local function buildPanel()
     return frame
 end
 
--- One toggle for /sr, the minimap button and the addon menu. The window is built on first use.
+-- One toggle for /rm, the minimap button and the addon menu. The window is built on first use.
 ns.TogglePanel = UI.CreateToggle(buildPanel)
 
 -- Called after any change to the reminders, so an open window mirrors them.

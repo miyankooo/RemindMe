@@ -163,7 +163,7 @@ function MagicButton_OnLoad() end
 -- === libraries: the real LibStub and LibNativeUI, fake broker and icon ===
 local function load(path, ns)
     local chunk = assert(loadfile(ADDON .. path))
-    chunk("SimpleReminders", ns)
+    chunk("RemindMe", ns)
 end
 load("Libs/LibStub/LibStub.lua")
 load("Libs/LibNativeUI-1.0/LibNativeUI-1.0.lua")
@@ -186,7 +186,7 @@ for _, file in ipairs({
 end
 
 local Time, Reminders = ns.Time, ns.Reminders
-local slash = SlashCmdList.SIMPLEREMINDERS
+local slash = SlashCmdList.REMINDME
 
 -- Bootstrap's loader is the first frame Bootstrap created with a PLAYER_LOGIN script.
 local function fire(frame, event, ...) frame.scripts.OnEvent(frame, event, ...) end
@@ -202,7 +202,7 @@ check("events frame created at login", events ~= nil)
 fire(events, "PLAYER_ENTERING_WORLD", true, false)
 check("ticker started on entering the world", ticker ~= nil)
 
-local db = SimpleRemindersDB
+local db = RemindMeDB
 local function tick(seconds)
     world.now = world.now + (seconds or 0)
     ticker.fn()
@@ -279,19 +279,19 @@ check("Add refuses empty zone", select(2, Reminders.Add({ kind = "zone", zone = 
 tick(59)
 check("not due early", #db.reminders == 1 and #chat == 0)
 tick(1)
-check("whisper delivered", last() == "[Simple Reminders] whispers: Tea" and sounds[1] == SOUNDKIT.TELL_MESSAGE)
+check("whisper delivered", last() == "[Remind Me] whispers: Tea" and sounds[1] == SOUNDKIT.TELL_MESSAGE)
 check("one-time removed after firing", #db.reminders == 0)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 30, text = "Stretch", output = "print", rep = true })
 tick(30)
-check("system line delivered", last() == "[Simple Reminders]: Stretch")
+check("system line delivered", last() == "[Remind Me]: Stretch")
 check("repeating timer restarts", #db.reminders == 1 and db.reminders[1].due == NOW + 60)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 5, text = "Pull {star}", output = "warning" })
 tick(5)
-check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and last() == "[Simple Reminders]: Pull {star}")
+check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and last() == "[Remind Me]: Pull {star}")
 check("warning plays the raid warning sound", sounds[1] == SOUNDKIT.RAID_WARNING)
 
 reset()
@@ -311,7 +311,7 @@ world.zone, world.subzone = "Elwynn Forest", ""
 fire(events, "ZONE_CHANGED_NEW_AREA")
 world.zone, world.subzone = "Stormwind City", "Cathedral Square"
 fire(events, "ZONE_CHANGED_NEW_AREA")
-check("entering fires, partial name matches", last() == "[Simple Reminders]: Reagents")
+check("entering fires, partial name matches", last() == "[Remind Me]: Reagents")
 fire(events, "ZONE_CHANGED")
 check("moving inside the zone does not fire again", #chat == 1)
 world.zone = ""
@@ -330,7 +330,7 @@ world.zone, world.subzone = "Ironforge", "The Commons"
 Reminders.Add({ kind = "zone", zone = "Trade District", text = "Sell", output = "print" })
 world.subzone = "Trade District"
 fire(events, "ZONE_CHANGED")
-check("subzone match fires once and removes a one-time reminder", last() == "[Simple Reminders]: Sell" and #db.reminders == 0)
+check("subzone match fires once and removes a one-time reminder", last() == "[Remind Me]: Sell" and #db.reminders == 0)
 
 -- === catch-up at login ===
 reset()
@@ -349,20 +349,20 @@ check("long-missed repeat does not fire", table.concat(chat, "|"):find("Missed r
 -- === slash commands ===
 reset()
 slash("in 1h 30m tea")
-check("/sr in adds a whisper countdown", #db.reminders == 1 and db.reminders[1].seconds == 5400 and db.reminders[1].output == "whisper")
-check("/sr in confirms in one line", last():find("Added: tea", 1, true) ~= nil)
+check("/rm in adds a whisper countdown", #db.reminders == 1 and db.reminders[1].seconds == 5400 and db.reminders[1].output == "whisper")
+check("/rm in confirms in one line", last():find("Added: tea", 1, true) ~= nil)
 
 reset()
 slash("at 19:45 warning monday Raid tonight")
 r = db.reminders[1]
-check("/sr at with options", r and r.kind == "clock" and r.output == "warning" and r.rep == 2 and r.text == "Raid tonight")
-check("/sr at follows the realm clock setting", r.realm == true)
+check("/rm at with options", r and r.kind == "clock" and r.output == "warning" and r.rep == 2 and r.text == "Raid tonight")
+check("/rm at follows the realm clock setting", r.realm == true)
 
 reset()
 world.localTime = true
 slash("at 8 pm daily Dailies")
 r = db.reminders[1]
-check("/sr at 8 pm daily on local clock", r and r.hour == 20 and r.rep == true and r.realm == false and r.text == "Dailies")
+check("/rm at 8 pm daily on local clock", r and r.hour == 20 and r.rep == true and r.realm == false and r.text == "Dailies")
 slash("at 8 pm realm Realm one")
 check("realm option overrides the setting", db.reminders[2].realm == true)
 world.localTime = false
@@ -370,50 +370,50 @@ world.localTime = false
 reset()
 slash("zone Stormwind City: print repeat Buy reagents")
 r = db.reminders[1]
-check("/sr zone with colon", r and r.zone == "Stormwind City" and r.output == "print" and r.rep == true and r.text == "Buy reagents")
+check("/rm zone with colon", r and r.zone == "Stormwind City" and r.output == "print" and r.rep == true and r.text == "Buy reagents")
 slash("zone Orgrimmar Visit the bank")
-check("/sr zone without colon takes one word", db.reminders[2].zone == "Orgrimmar" and db.reminders[2].text == "Visit the bank")
+check("/rm zone without colon takes one word", db.reminders[2].zone == "Orgrimmar" and db.reminders[2].text == "Visit the bank")
 world.zone = "Darnassus"
 slash("here Feed the cat")
-check("/sr here uses the current zone", db.reminders[3].zone == "Darnassus")
+check("/rm here uses the current zone", db.reminders[3].zone == "Darnassus")
 
 reset()
 slash("in tea")
-check("/sr in without a duration explains", last():find(ns.NEED_DURATION, 1, true) ~= nil and #db.reminders == 0)
+check("/rm in without a duration explains", last():find(ns.NEED_DURATION, 1, true) ~= nil and #db.reminders == 0)
 slash("at 25:00 x")
-check("/sr at with a bad time explains", last():find(ns.NEED_CLOCK, 1, true) ~= nil)
+check("/rm at with a bad time explains", last():find(ns.NEED_CLOCK, 1, true) ~= nil)
 slash("in 5m")
-check("/sr in without text explains", last():find(ns.NEED_TEXT, 1, true) ~= nil)
+check("/rm in without text explains", last():find(ns.NEED_TEXT, 1, true) ~= nil)
 slash("in 5m monday tea")
 check("weekday on a countdown refused", last():find("Weekdays", 1, true) ~= nil and #db.reminders == 0)
 slash("bogus")
-check("unknown command points to help", last():find("/sr help", 1, true) ~= nil)
+check("unknown command points to help", last():find("/rm help", 1, true) ~= nil)
 
 reset()
 slash("in 10m First")
 slash("in 5m Second")
 slash("list")
-check("/sr list sorts by due time", chat[#chat - 1]:find("^1%. Second") and last():find("^2%. First"))
+check("/rm list sorts by due time", chat[#chat - 1]:find("^1%. Second") and last():find("^2%. First"))
 slash("test 1")
-check("/sr test shows without removing", last() == "[Simple Reminders] whispers: Second" and #db.reminders == 2)
+check("/rm test shows without removing", last() == "[Remind Me] whispers: Second" and #db.reminders == 2)
 slash("remove 1")
-check("/sr remove takes the list number", #db.reminders == 1 and db.reminders[1].text == "First")
+check("/rm remove takes the list number", #db.reminders == 1 and db.reminders[1].text == "First")
 slash("remove 9")
-check("/sr remove with a bad number explains", last():find("/sr list", 1, true) ~= nil)
+check("/rm remove with a bad number explains", last():find("/rm list", 1, true) ~= nil)
 slash("clear")
-check("/sr clear empties", #db.reminders == 0)
+check("/rm clear empties", #db.reminders == 0)
 slash("help")
-check("/sr help prints the commands", #chat > 8)
+check("/rm help prints the commands", #chat > 8)
 slash("minimap")
-check("/sr minimap hides the button", db.minimap.hide == true)
+check("/rm minimap hides the button", db.minimap.hide == true)
 slash("minimap")
-check("/sr minimap shows it again", db.minimap.hide == false)
+check("/rm minimap shows it again", db.minimap.hide == false)
 
 -- === window smoke run ===
 reset()
 slash("")
-local window = SimpleRemindersFrame
-check("/sr opens the window", window and window.shown)
+local window = RemindMeFrame
+check("/rm opens the window", window and window.shown)
 local boxes = {}
 for _, frame in ipairs(created) do
     if frame.template == "InputBoxInstructionsTemplate" then boxes[#boxes + 1] = frame end
@@ -433,7 +433,7 @@ window:RefreshTimes()
 tick(900)
 check("firing refreshes the open window", #db.reminders == 0)
 slash("")
-check("/sr closes the window", not window.shown)
+check("/rm closes the window", not window.shown)
 
 print = realPrint
 print(string.format("%d passed, %d failed", passes, failures))

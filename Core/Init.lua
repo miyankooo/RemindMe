@@ -2,12 +2,12 @@ local _, ns = ...
 
 -- Spaced name for everything the player reads: the window title, the chat prefix and the
 -- launcher, whose LibDataBroker name it also is.
-ns.TITLE = "Simple Reminders"
+ns.TITLE = "Remind Me"
 
 -- The bell from the toc's IconTexture, file 133706.
 ns.ICON = "Interface\\Icons\\INV_Misc_Bell_01"
 
--- What starts a reminder, in the order the window and /sr help offer them.
+-- What starts a reminder, in the order the window and /rm help offer them.
 ns.KINDS = { "timer", "clock", "zone" }
 ns.KIND_LABELS = { timer = "Countdown", clock = "Time of Day", zone = ZONE }
 

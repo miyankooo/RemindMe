@@ -5,7 +5,7 @@ local Time = ns.Time
 local Reminders = {}
 ns.Reminders = Reminders
 
--- Problems the window and /sr report in the same words.
+-- Problems the window and /rm report in the same words.
 ns.NEED_TEXT = "Type the reminder text."
 ns.NEED_DURATION = "Type a countdown, such as 30m or 1h 30m."
 ns.NEED_CLOCK = "Type a time, such as 20:30 or 8:30 PM."
@@ -15,11 +15,11 @@ ns.NEED_ZONE = "Type a zone, such as Stormwind City."
 local inside = {}
 
 local function list()
-    return SimpleRemindersDB.reminders
+    return RemindMeDB.reminders
 end
 
--- Timed reminders by due time, then zone reminders in the order added. The window and /sr list
--- share this order, so /sr remove takes the numbers /sr list shows.
+-- Timed reminders by due time, then zone reminders in the order added. The window and /rm list
+-- share this order, so /rm remove takes the numbers /rm list shows.
 function Reminders.Sorted()
     local sorted = {}
     for i, r in ipairs(list()) do sorted[i] = r end
@@ -132,7 +132,7 @@ function Reminders.Fire(r, now)
     ns.RefreshPanel()
 end
 
--- Stores a reminder from the window or /sr. The callers parse the countdown and the time, so
+-- Stores a reminder from the window or /rm. The callers parse the countdown and the time, so
 -- only the text and the zone are checked here. Returns the reminder, or nil and the problem.
 function Reminders.Add(r)
     r.text = ns.trim(r.text)
@@ -144,7 +144,7 @@ function Reminders.Add(r)
     r.rep = r.rep or false
     r.output = DELIVER[r.output] and r.output or ns.DEFAULT_OUTPUT
 
-    local db = SimpleRemindersDB
+    local db = RemindMeDB
     r.id = db.nextId
     db.nextId = db.nextId + 1
     schedule(r, GetServerTime())

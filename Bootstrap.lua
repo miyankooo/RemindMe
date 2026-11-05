@@ -6,8 +6,8 @@ local _, ns = ...
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function()
-    SimpleRemindersDB = SimpleRemindersDB or {}
-    local db = SimpleRemindersDB
+    RemindMeDB = RemindMeDB or {}
+    local db = RemindMeDB
     db.minimap = db.minimap or { hide = false, minimapPos = 235 }
     db.window = db.window or {}
     db.reminders = db.reminders or {}

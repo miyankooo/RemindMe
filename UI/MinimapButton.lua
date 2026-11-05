@@ -35,15 +35,15 @@ function ns.SetupLauncher()
     launcher = UI.CreateLauncher({
         title = ns.TITLE,
         icon = ns.ICON,
-        db = SimpleRemindersDB.minimap,
+        db = RemindMeDB.minimap,
         onClick = function() ns.TogglePanel() end,
         tooltip = fillTooltip,
     })
 end
 
--- /sr minimap flips only the minimap button. The addon menu entry always stays as the way back.
+-- /rm minimap flips only the minimap button. The addon menu entry always stays as the way back.
 function ns.ToggleMinimap()
-    local show = SimpleRemindersDB.minimap.hide
+    local show = RemindMeDB.minimap.hide
     launcher.setShown(show)
-    UI.Print(ns.TITLE, show and "Minimap button shown." or "Minimap button hidden. Type /sr minimap to show it again.")
+    UI.Print(ns.TITLE, show and "Minimap button shown." or "Minimap button hidden. Type /rm minimap to show it again.")
 end

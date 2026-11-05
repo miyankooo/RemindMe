@@ -1,4 +1,4 @@
-package-as: SimpleReminders
+package-as: RemindMe
 
 manual-changelog:
   filename: CHANGELOG.md
