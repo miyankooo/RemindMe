@@ -209,4 +209,4 @@ local function handleSlash(msg)
     end
 end
 
-UI.RegisterSlash("REMINDME", { "/remindme", "/rm", "/sr" }, handleSlash)
+UI.RegisterSlash("REMINDME", { "/remindme", "/rm" }, handleSlash)
