@@ -31,11 +31,14 @@ function Reminders.Sorted()
     return sorted
 end
 
+-- Zone reminders have no due time, also after an edit turned a timed reminder into one.
 local function schedule(r, now)
     if r.kind == "timer" then
         r.due = now + r.seconds
     elseif r.kind == "clock" then
         r.due = Time.NextClock(r, now)
+    else
+        r.due = nil
     end
 end
 
@@ -132,9 +135,10 @@ function Reminders.Fire(r, now)
     ns.RefreshPanel()
 end
 
--- Stores a reminder from the window or /rm. The callers parse the countdown and the time, so
--- only the text and the zone are checked here. Returns the reminder, or nil and the problem.
-function Reminders.Add(r)
+-- Checks a reminder from the window or /rm and fills in its defaults. The callers parse the
+-- countdown and the time, so only the text and the zone are checked here. Returns the reminder,
+-- or nil and the problem.
+local function check(r)
     r.text = ns.trim(r.text)
     if r.text == "" then return nil, ns.NEED_TEXT end
     if r.kind == "zone" then
@@ -143,6 +147,35 @@ function Reminders.Add(r)
     end
     r.rep = r.rep or false
     r.output = DELIVER[r.output] and r.output or ns.DEFAULT_OUTPUT
+    return r
+end
+
+-- Everything an edit may change. id and due stay with the stored reminder.
+local FIELDS = { "kind", "text", "output", "rep", "seconds", "hour", "minute", "realm", "zone" }
+
+-- Rewrites a stored reminder in place, so it keeps its id and its place in the list. A countdown
+-- keeps running unless its length or trigger changed. A time of day is rescheduled from its new
+-- time. A zone reminder keeps its entry state unless its zone changed.
+function Reminders.Update(r, spec)
+    local changed, problem = check(spec)
+    if not changed then return nil, problem end
+    local restart = changed.kind ~= r.kind or changed.kind == "clock" or changed.seconds ~= r.seconds
+    local rezone = changed.kind == "zone" and (r.kind ~= "zone" or changed.zone ~= r.zone)
+    for _, key in ipairs(FIELDS) do r[key] = changed[key] end
+    if restart then schedule(r, GetServerTime()) end
+    if rezone then
+        inside[r.id] = inZone(r)
+    elseif r.kind ~= "zone" then
+        inside[r.id] = nil
+    end
+    ns.RefreshPanel()
+    return r
+end
+
+function Reminders.Add(r)
+    local problem
+    r, problem = check(r)
+    if not r then return nil, problem end
 
     local db = RemindMeDB
     r.id = db.nextId

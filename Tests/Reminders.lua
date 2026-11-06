@@ -64,6 +64,10 @@ local function newRegion(kind, template)
         AddMessage = function(self, line) chat[#chat + 1] = line end,
         ContainsMessageGroup = function() return true end,
         Cancel = function(self) self.cancelled = true end,
+        CreateTexture = function() return newRegion("Texture") end,
+        CreateFontString = function() return newRegion("FontString") end,
+        SetEnabled = function(self, enabled) self.disabled = not enabled end,
+        IsEnabled = function(self) return not self.disabled end,
     }
     setmetatable(r, {
         __index = function(t, k)
@@ -96,6 +100,10 @@ GameTooltip = newRegion("GameTooltip")
 UISpecialFrames = {}
 tinsert = table.insert
 wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
+tContains = function(t, item)
+    for _, value in ipairs(t) do if value == item then return true end end
+    return false
+end
 tDeleteItem = function(t, item)
     for i = #t, 1, -1 do if t[i] == item then table.remove(t, i) end end
 end
@@ -117,8 +125,10 @@ GameFontNormalLarge, GameFontNormal, GameFontHighlight, GameFontDisable = {}, {}
 SCROLL_FRAME_SCROLL_BAR_OFFSET_LEFT = 6
 PANEL_INSET_LEFT_OFFSET, PANEL_INSET_RIGHT_OFFSET = 4, -6
 PANEL_INSET_BOTTOM_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET = 4, 26
+PANEL_INSET_TOP_OFFSET, PANEL_INSET_ATTIC_OFFSET = -24, -60
 
 ZONE, WHISPER, CHAT, RAID_WARNING = "Zone", "Whisper", "Chat", "Raid Warning"
+SAVE, DELETE = "Save", "Delete"
 CHAT_WHISPER_GET = "%s whispers: "
 CALENDAR_WEEKDAY_NAMES = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 ChatTypeInfo = { WHISPER = { r = 1, g = 0.5, b = 1, id = 7 }, SYSTEM = { r = 1, g = 1, b = 0, id = 1 }, RAID_WARNING = { r = 1, g = 0.3, b = 0, id = 9 } }
@@ -409,32 +419,113 @@ check("/rm minimap hides the button", db.minimap.hide == true)
 slash("minimap")
 check("/rm minimap shows it again", db.minimap.hide == false)
 
--- === window smoke run ===
+-- === field text for editing ===
+check("duration field reads 1h 30m", Time.FormatDuration(5400) == "1h 30m")
+check("duration field reads 1m 30s", Time.FormatDuration(90) == "1m 30s")
+check("duration field parses back", Time.ParseDuration(Time.FormatDuration(3725)) == 3725)
+check("clock field parses back", Time.FormatClockField(20, 30) == "20:30")
+
+-- === editing in place ===
+reset()
+r = Reminders.Add({ kind = "timer", seconds = 600, text = "Old", output = "whisper" })
+local id, due0 = r.id, r.due
+world.now = NOW + 100
+check("edit refuses empty text", Reminders.Update(r, { kind = "timer", seconds = 600, text = " " }) == nil and r.text == "Old")
+Reminders.Update(r, { kind = "timer", seconds = 600, text = "New text", output = "print" })
+check("text edit keeps the countdown running", r.id == id and r.due == due0 and r.text == "New text" and r.output == "print")
+Reminders.Update(r, { kind = "timer", seconds = 60, text = "New text", output = "print" })
+check("new length restarts the countdown", r.due == NOW + 160)
+world.zone = "Stormwind City"
+Reminders.Update(r, { kind = "zone", zone = "Stormwind", text = "Now a zone", output = "print" })
+check("trigger change clears old fields", r.kind == "zone" and r.due == nil and r.seconds == nil and r.zone == "Stormwind")
+fire(events, "ZONE_CHANGED")
+check("edited into the current zone is no entry", #chat == 0 and #db.reminders == 1)
+Reminders.Update(r, { kind = "clock", hour = 21, minute = 0, realm = true, rep = true, text = "Now a time", output = "print" })
+check("zone to time of day schedules it", r.due and r.due > world.now and r.zone == nil)
+
+-- === window ===
 reset()
 slash("")
 local window = RemindMeFrame
 check("/rm opens the window", window and window.shown)
-local boxes = {}
+local boxes, bar = {}, {}
 for _, frame in ipairs(created) do
     if frame.template == "InputBoxInstructionsTemplate" then boxes[#boxes + 1] = frame end
+    if frame.template == "MagicButtonTemplate" then bar[#bar + 1] = frame end
 end
 local textBox, valueBox = boxes[1], boxes[2]
-window:AddFromForm()
+local saveButton, newButton, deleteButton = bar[1], bar[2], bar[3]
+local function rows()
+    local found = {}
+    for _, frame in ipairs(created) do
+        if frame.kind == "Button" and frame.reminder and frame.shown then found[#found + 1] = frame end
+    end
+    table.sort(found, function(a, b) return (a.reminder.due or math.huge) < (b.reminder.due or math.huge) end)
+    return found
+end
+
+check("a new reminder is the start", saveButton.text == "Add Reminder" and window.help.text:find("Fill in", 1, true))
+check("New and Delete wait for a selection", newButton.disabled and deleteButton.disabled)
+window:SaveForm()
 check("empty form names the text first", #db.reminders == 0)
 textBox.text = "Check mail"
 valueBox.text = "soon"
-window:AddFromForm()
+window:SaveForm()
 check("bad countdown refused", #db.reminders == 0)
 valueBox.text = "15m"
-window:AddFromForm()
+window:SaveForm()
 check("form adds a countdown", #db.reminders == 1 and db.reminders[1].seconds == 900 and db.reminders[1].output == "whisper")
 check("form clears its fields", textBox.text == "" and valueBox.text == "")
-window:RefreshTimes()
-tick(900)
-check("firing refreshes the open window", #db.reminders == 0)
+slash("at 20:30 print daily Raid")
+check("the list shows both reminders", #rows() == 2)
+
+local mail = rows()[1]
+mail.scripts.OnClick(mail)
+check("clicking a row loads it", textBox.text == "Check mail" and valueBox.text == "15m")
+check("a selection switches to editing", saveButton.text == "Save" and window.help.text:find("Change", 1, true))
+check("New and Delete turn on", not newButton.disabled and not deleteButton.disabled)
+check("the row shows as selected", mail.selection.shown and not mail.hover.shown)
+
+local mailReminder, mailDue = mail.reminder, mail.reminder.due
+world.now = NOW + 60
+textBox.text = "Check the mailbox"
+window:SaveForm()
+check("Save edits in place", #db.reminders == 2 and mailReminder.text == "Check the mailbox" and mailReminder.due == mailDue)
+check("Save stays on the reminder", saveButton.text == "Save" and rows()[1].reminder == mailReminder)
+valueBox.text = "1h"
+window:SaveForm()
+check("a new countdown restarts on Save", mailReminder.due == world.now + 3600)
+
+local raid = rows()[2]
+raid.scripts.OnClick(raid)
+check("a time of day loads its time", raid.reminder.kind == "clock" and valueBox.text == "20:30" and textBox.text == "Raid")
+
+newButton.scripts.OnClick(newButton)
+check("New Reminder empties the editor", textBox.text == "" and valueBox.text == "" and saveButton.text == "Add Reminder")
+check("New Reminder clears the selection", not raid.selection.shown)
+
+local target = rows()[1]
+target.scripts.OnClick(target)
+local deleting = target.reminder
+deleteButton.scripts.OnClick(deleteButton)
+check("Delete removes the selected reminder", #db.reminders == 1 and not tContains(db.reminders, deleting))
+check("Delete returns to a new reminder", saveButton.text == "Add Reminder" and deleteButton.disabled)
+
+reset()
+slash("in 5m Tea")
+local tea = rows()[1]
+tea.scripts.OnClick(tea)
+tick(300)
+check("a fired reminder leaves the editor, its text stays", saveButton.text == "Add Reminder" and textBox.text == "Tea")
+
 slash("")
 check("/rm closes the window", not window.shown)
-
+slash("in 5m First")
+slash("in 10m Second")
+slash("edit 2")
+check("/rm edit opens the window on that reminder", window.shown and textBox.text == "Second" and saveButton.text == "Save")
+slash("edit 9")
+check("/rm edit with a bad number explains", last():find("/rm list", 1, true) ~= nil)
 print = realPrint
 print(string.format("%d passed, %d failed", passes, failures))
 os.exit(failures == 0 and 0 or 1)

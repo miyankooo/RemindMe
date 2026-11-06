@@ -132,6 +132,11 @@ local function removeAt(word)
     say("Removed: " .. r.text .. ".")
 end
 
+local function editAt(word)
+    local r = pick(word)
+    if r then ns.EditInPanel(r) end
+end
+
 local function testAt(word)
     local r = pick(word)
     if r then Reminders.Preview(r.output, r.text) end
@@ -156,6 +161,7 @@ local HELP = {
     { "Options", "go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or a weekday such as monday." },
     { "/rm at 19:45 warning monday Raid tonight", "warns you every Monday." },
     { "/rm list", "lists your reminders with numbers." },
+    { "/rm edit 2", "opens reminder 2 in the window to change it." },
     { "/rm remove 2", "removes reminder 2. /rm test 2 shows it once now." },
     { "/rm clear", "removes every reminder." },
     { "/rm minimap", "hides or shows the minimap button." },
@@ -188,6 +194,8 @@ local function handleSlash(msg)
         list()
     elseif command == "remove" or command == "delete" then
         removeAt(words[2])
+    elseif command == "edit" then
+        editAt(words[2])
     elseif command == "test" then
         testAt(words[2])
     elseif command == "clear" then

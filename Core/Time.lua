@@ -132,6 +132,26 @@ function Time.FormatClock(hour, minute)
     return GameTime_GetFormattedTime(hour, minute, true)
 end
 
+-- The window's field text for a stored reminder, in a form Parse reads back. A countdown reads
+-- like "1h 30m". A time follows the clock setting, or 24 hour where the client's AM and PM words
+-- do not parse.
+function Time.FormatDuration(seconds)
+    local parts = {}
+    for _, unit in ipairs({ { 3600, "h" }, { 60, "m" }, { 1, "s" } }) do
+        local count = math.floor(seconds / unit[1])
+        if count > 0 then parts[#parts + 1] = count .. unit[2] end
+        seconds = seconds % unit[1]
+    end
+    return table.concat(parts, " ")
+end
+
+function Time.FormatClockField(hour, minute)
+    local text = Time.FormatClock(hour, minute)
+    local readHour, readMinute = Time.ParseClock(text)
+    if readHour == hour and readMinute == minute then return text end
+    return string.format("%02d:%02d", hour, minute)
+end
+
 -- Time left in Blizzard's short units: seconds under a minute, otherwise at most two units.
 function Time.FormatLeft(seconds)
     seconds = math.max(seconds, 1)
