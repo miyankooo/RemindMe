@@ -1,5 +1,5 @@
 -- Loads every addon file in toc order against a small client stub, then checks parsing, scheduling,
--- catch-up, delivery, zone entry, every slash command and a smoke run of the window.
+-- catch-up, delivery, snooze links, zone entry, every slash command and the window's flows.
 --
 -- What it cannot prove: anything the real client decides. GetGameTime's realm clock, the raid warning
 -- frame, chat tab routing, sounds, LibDBIcon and every pixel of the window still need an in-game pass.
@@ -27,7 +27,7 @@ local REALM_OFFSET = -8 * 3600
 local world = { now = NOW, zone = "Elwynn Forest", subzone = "Goldshire", localTime = false }
 
 local chat, sounds, warnings = {}, {}, {}
-local ticker
+local ticker, focused
 
 -- === frame stub: unknown methods record and chain, a few keep state ===
 local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true }
@@ -68,6 +68,10 @@ local function newRegion(kind, template)
         CreateFontString = function() return newRegion("FontString") end,
         SetEnabled = function(self, enabled) self.disabled = not enabled end,
         IsEnabled = function(self) return not self.disabled end,
+        SetChecked = function(self, checked) self.checked = checked and true or false end,
+        GetChecked = function(self) return self.checked or false end,
+        SetFocus = function(self) focused = self end,
+        ClearFocus = function(self) if focused == self then focused = nil end end,
     }
     setmetatable(r, {
         __index = function(t, k)
@@ -121,14 +125,17 @@ local function color()
 end
 NORMAL_FONT_COLOR, HIGHLIGHT_FONT_COLOR, GRAY_FONT_COLOR = color(), color(), color()
 GREEN_FONT_COLOR, RED_FONT_COLOR, WARNING_FONT_COLOR, YELLOW_FONT_COLOR = color(), color(), color(), color()
-GameFontNormalLarge, GameFontNormal, GameFontHighlight, GameFontDisable = {}, {}, {}, {}
+local function font() return { GetFont = function() return "Fonts\\FRIZQT__.TTF", 12 end } end
+GameFontNormalLarge, GameFontNormal, GameFontHighlight, GameFontDisable = font(), font(), font(), font()
+LINK_FONT_COLOR = color()
 SCROLL_FRAME_SCROLL_BAR_OFFSET_LEFT = 6
 PANEL_INSET_LEFT_OFFSET, PANEL_INSET_RIGHT_OFFSET = 4, -6
 PANEL_INSET_BOTTOM_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET = 4, 26
 PANEL_INSET_TOP_OFFSET, PANEL_INSET_ATTIC_OFFSET = -24, -60
 
 ZONE, WHISPER, CHAT, RAID_WARNING = "Zone", "Whisper", "Chat", "Raid Warning"
-SAVE, DELETE = "Save", "Delete"
+SAVE, DELETE, CANCEL = "Save", "Delete", "Cancel"
+TIMEMANAGER_LOCALTIME = "Use Local Time"
 CHAT_WHISPER_GET = "%s whispers: "
 CALENDAR_WEEKDAY_NAMES = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 ChatTypeInfo = { WHISPER = { r = 1, g = 0.5, b = 1, id = 7 }, SYSTEM = { r = 1, g = 1, b = 0, id = 1 }, RAID_WARNING = { r = 1, g = 0.3, b = 0, id = 9 } }
@@ -159,6 +166,16 @@ C_Timer = {
     end,
 }
 FrameUtil = { RegisterFrameForEvents = function() end }
+-- Blizzard's chat hands a clicked addon link to this callback (ItemRefHandlersShared.lua).
+local linkCallbacks = {}
+EventRegistry = {
+    RegisterCallback = function(_, event, fn, owner)
+        if event == "SetItemRef" then linkCallbacks[owner] = fn end
+    end,
+}
+local function clickLink(link)
+    for owner, fn in pairs(linkCallbacks) do fn(owner, link, "[link]", "LeftButton", DEFAULT_CHAT_FRAME) end
+end
 function GameTooltip_SetTitle() end
 function GameTooltip_AddNormalLine() end
 function GameTooltip_AddDisabledLine() end
@@ -218,6 +235,8 @@ local function tick(seconds)
     ticker.fn()
 end
 local function last() return chat[#chat] or "" end
+local function starts(line, prefix) return line:sub(1, #prefix) == prefix end
+local function hasSnooze(line) return line:find("|Haddon:RemindMe:snooze:", 1, true) ~= nil end
 local function reset()
     Reminders.Clear()
     chat, warnings, sounds = {}, {}, {}
@@ -268,11 +287,14 @@ world.now = due
 check("due moment itself moves to the next day", Time.NextClock(realmDaily, due) == due + 86400)
 world.now = NOW
 
-local realmMonday = { kind = "clock", hour = 19, minute = 45, realm = true, rep = 2 }
+local realmMonday = { kind = "clock", hour = 19, minute = 45, realm = true, rep = { 2 } }
 due = Time.NextClock(realmMonday, NOW)
 wall = os.date("!*t", due + REALM_OFFSET)
 check("weekly lands on a realm Monday", wall.wday == 2 and wall.hour == 19 and wall.min == 45)
 check("weekly is within a week", due > NOW and due - NOW <= 7 * 86400)
+local realmMonFri = { kind = "clock", hour = 19, minute = 45, realm = true, rep = { 2, 6 } }
+local monFriDue, monFriDay = Time.NextClock(realmMonFri, NOW)
+check("several weekdays take the nearest", monFriDay == 6 and monFriDue < due)
 
 local localDaily = { kind = "clock", hour = 6, minute = 15, realm = false, rep = false }
 due = Time.NextClock(localDaily, NOW)
@@ -289,19 +311,21 @@ check("Add refuses empty zone", select(2, Reminders.Add({ kind = "zone", zone = 
 tick(59)
 check("not due early", #db.reminders == 1 and #chat == 0)
 tick(1)
-check("whisper delivered", last() == "[Remind Me Later] whispers: Tea" and sounds[1] == SOUNDKIT.TELL_MESSAGE)
+check("whisper delivered", starts(last(), "[Remind Me Later] whispers: Tea ") and sounds[1] == SOUNDKIT.TELL_MESSAGE)
+check("a fired whisper carries the snooze link", hasSnooze(last()))
 check("one-time removed after firing", #db.reminders == 0)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 30, text = "Stretch", output = "print", rep = true })
 tick(30)
-check("system line delivered", last() == "[Remind Me Later]: Stretch")
+check("system line delivered", starts(last(), "[Remind Me Later]: Stretch ") and hasSnooze(last()))
 check("repeating timer restarts", #db.reminders == 1 and db.reminders[1].due == NOW + 60)
 
 reset()
 Reminders.Add({ kind = "timer", seconds = 5, text = "Pull {star}", output = "warning" })
 tick(5)
-check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and last() == "[Remind Me Later]: Pull {star}")
+check("warning shows centre text and chat line", warnings[1] == "Pull {star}" and starts(last(), "[Remind Me Later]: Pull {star} "))
+check("the snooze link stays out of the centre text", hasSnooze(last()) and not hasSnooze(warnings[1]))
 check("warning plays the raid warning sound", sounds[1] == SOUNDKIT.RAID_WARNING)
 
 reset()
@@ -321,7 +345,7 @@ world.zone, world.subzone = "Elwynn Forest", ""
 fire(events, "ZONE_CHANGED_NEW_AREA")
 world.zone, world.subzone = "Stormwind City", "Cathedral Square"
 fire(events, "ZONE_CHANGED_NEW_AREA")
-check("entering fires, partial name matches", last() == "[Remind Me Later]: Reagents")
+check("entering fires, partial name matches", starts(last(), "[Remind Me Later]: Reagents "))
 fire(events, "ZONE_CHANGED")
 check("moving inside the zone does not fire again", #chat == 1)
 world.zone = ""
@@ -340,7 +364,38 @@ world.zone, world.subzone = "Ironforge", "The Commons"
 Reminders.Add({ kind = "zone", zone = "Trade District", text = "Sell", output = "print" })
 world.subzone = "Trade District"
 fire(events, "ZONE_CHANGED")
-check("subzone match fires once and removes a one-time reminder", last() == "[Remind Me Later]: Sell" and #db.reminders == 0)
+check("subzone match fires once and removes a one-time reminder", starts(last(), "[Remind Me Later]: Sell ") and #db.reminders == 0)
+
+-- === weekdays ===
+reset()
+r = Reminders.Add({ kind = "clock", hour = 19, minute = 45, realm = true, rep = { 4, 2, 4 }, text = "Raid", output = "print" })
+check("weekdays stored once each in week order", #r.rep == 2 and r.rep[1] == 2 and r.rep[2] == 4)
+check("weekdays read as a sentence", Reminders.Describe(r, NOW):find("every Monday and Wednesday at 19:45 realm time, next in", 1, true) ~= nil)
+r = Reminders.Add({ kind = "clock", hour = 9, minute = 0, realm = true, rep = { 1, 2, 3, 4, 5, 6, 7 }, text = "All", output = "print" })
+check("all seven weekdays are every day", r.rep == true)
+r = Reminders.Add({ kind = "clock", hour = 9, minute = 0, realm = true, rep = {}, text = "None", output = "print" })
+check("no weekday is once", r.rep == false)
+r = Reminders.Add({ kind = "clock", hour = 9, minute = 0, realm = true, rep = { 2, 4, 6 }, text = "Three", output = "print" })
+check("three weekdays read with commas", Reminders.Describe(r, NOW):find("every Monday, Wednesday and Friday at", 1, true) ~= nil)
+
+-- === snooze ===
+reset()
+Reminders.Add({ kind = "timer", seconds = 5, text = "Tea", output = "print" })
+tick(5)
+local link = last():match("|H(addon:RemindMe:snooze:[%d:]+)|h")
+check("the fired line links a snooze", link ~= nil and #db.reminders == 0)
+clickLink(link)
+r = db.reminders[1]
+check("snooze adds the reminder again as a one-time countdown", #db.reminders == 1 and r.kind == "timer"
+    and r.seconds == ns.SNOOZE and r.due == world.now + ns.SNOOZE and r.text == "Tea" and r.output == "print" and r.rep == false)
+check("snooze confirms in one line", last():find("Snoozed for", 1, true) ~= nil)
+clickLink(link)
+check("a link snoozes once", #db.reminders == 1 and last():find("Already snoozed", 1, true) ~= nil)
+clickLink("addon:RemindMe:snooze:1:1")
+check("a link from before a reload is refused", #db.reminders == 1 and last():find("reload", 1, true) ~= nil)
+local before = #chat
+clickLink("item:6948")
+check("other links are left alone", #chat == before)
 
 -- === catch-up at login ===
 reset()
@@ -356,6 +411,11 @@ check("one-time missed reminder fires", table.concat(chat, "|"):find("Missed onc
 check("repeat missed by seconds still fires", table.concat(chat, "|"):find("Reload repeat", 1, true) ~= nil)
 check("long-missed repeat does not fire", table.concat(chat, "|"):find("Missed repeat", 1, true) == nil)
 
+reset()
+db.reminders = { { id = 201, kind = "clock", hour = 19, minute = 45, realm = true, rep = 2, text = "Old weekly", output = "print" } }
+Reminders.Start()
+check("a weekday saved as a number becomes a list", type(db.reminders[1].rep) == "table" and db.reminders[1].rep[1] == 2)
+
 -- === slash commands ===
 reset()
 slash("in 1h 30m tea")
@@ -365,7 +425,15 @@ check("/rm in confirms in one line", last():find("Added: tea", 1, true) ~= nil)
 reset()
 slash("at 19:45 warning monday Raid tonight")
 r = db.reminders[1]
-check("/rm at with options", r and r.kind == "clock" and r.output == "warning" and r.rep == 2 and r.text == "Raid tonight")
+check("/rm at with options", r and r.kind == "clock" and r.output == "warning" and r.text == "Raid tonight")
+check("/rm at takes one weekday", type(r.rep) == "table" and #r.rep == 1 and r.rep[1] == 2)
+slash("at 19:45 monday wed Two nights")
+r = db.reminders[2]
+check("/rm at takes several weekdays", type(r.rep) == "table" and #r.rep == 2 and r.rep[1] == 2 and r.rep[2] == 4 and r.text == "Two nights")
+slash("at 9 mon tue wed thu fri sat sun Every day")
+check("/rm at with all weekdays is every day", db.reminders[3].rep == true)
+slash("at 9 daily monday Daily wins")
+check("/rm at daily wins over a weekday", db.reminders[4].rep == true)
 check("/rm at follows the realm clock setting", r.realm == true)
 
 reset()
@@ -455,6 +523,14 @@ for _, frame in ipairs(created) do
 end
 local textBox, valueBox = boxes[1], boxes[2]
 local saveButton, newButton, deleteButton = bar[1], bar[2], bar[3]
+local kinds, outputs, days = window.kindRadios, window.outputRadios, window.dayChecks
+local timerRepeat, zoneRepeat = window.repeatChecks.timer, window.repeatChecks.zone
+local preview, dialog = window.preview, window.deleteDialog
+local hereButton
+for _, frame in ipairs(created) do
+    if frame.text == "Current Zone" then hereButton = frame end
+end
+
 local function rows()
     local found = {}
     for _, frame in ipairs(created) do
@@ -464,57 +540,145 @@ local function rows()
     return found
 end
 
+-- A CheckButton flips itself before its OnClick, as the client does.
+local function click(button)
+    if button.kind == "CheckButton" then button.checked = not button.checked end
+    button.scripts.OnClick(button)
+end
+
+-- Typing sets the text and fires the hooked OnTextChanged as user input.
+local function typeInto(box, text)
+    box.text = text
+    box.hooks.OnTextChanged(box, true)
+end
+
 check("a new reminder is the start", saveButton.text == "Add Reminder" and window.help.text:find("Fill in", 1, true))
+check("the message takes the keyboard on open", focused == textBox)
 check("New and Delete wait for a selection", newButton.disabled and deleteButton.disabled)
+check("Add waits for a complete form", saveButton.disabled)
+check("the picks start on Countdown and Whisper", kinds.timer.checked and not kinds.clock.checked and outputs.whisper.checked)
+check("a countdown shows Repeat, not the clock or the weekdays", timerRepeat.shown and not window.localCheck.shown and not hereButton.shown)
+check("the empty preview says what a countdown does", preview.text == "Fires once the countdown runs out.")
+
+typeInto(textBox, "Check mail")
+typeInto(valueBox, "soon")
+check("an unreadable countdown shows in the preview", preview.text == ns.NEED_DURATION and saveButton.disabled)
 window:SaveForm()
-check("empty form names the text first", #db.reminders == 0)
-textBox.text = "Check mail"
-valueBox.text = "soon"
+check("an incomplete form adds nothing and points at the value", #db.reminders == 0 and focused == valueBox)
+typeInto(valueBox, "15m")
+check("a readable countdown previews its time", preview.text == "Fires in 900s." and not saveButton.disabled)
+click(timerRepeat)
+check("Repeat previews the next turns", preview.text == "Fires in 900s, then every 900s.")
+click(timerRepeat)
 window:SaveForm()
-check("bad countdown refused", #db.reminders == 0)
-valueBox.text = "15m"
+check("form adds a countdown", #db.reminders == 1 and db.reminders[1].seconds == 900 and db.reminders[1].output == "whisper" and db.reminders[1].rep == false)
+check("form clears its fields and confirms", textBox.text == "" and valueBox.text == "" and window.status.text == "Added.")
+typeInto(textBox, "x")
+check("typing clears the confirmation", window.status.text ~= "Added.")
+typeInto(textBox, "")
+
+-- Time of Day with weekdays.
+click(kinds.clock)
+check("Time of Day shows the clock and the weekdays", window.localCheck.shown and not timerRepeat.shown and kinds.clock.checked and not kinds.timer.checked)
+check("the value hint follows the trigger", valueBox.Instructions.text == "20:30 or 8:30 PM")
+click(kinds.clock)
+check("clicking the picked radio keeps it picked", kinds.clock.checked)
+typeInto(textBox, "Raid")
+typeInto(valueBox, "19:45")
+click(days[2])
+click(days[4])
+check("a time previews its next day", preview.text:find("Next: Wednesday at 19:45 realm time", 1, true) ~= nil)
+click(window.localCheck)
+check("Use Local Time drops the realm clock", preview.text:find("Next: Wednesday at 19:45, in", 1, true) ~= nil)
+click(window.localCheck)
+click(outputs.warning)
+check("an output radio picks one output", outputs.warning.checked and not outputs.whisper.checked)
 window:SaveForm()
-check("form adds a countdown", #db.reminders == 1 and db.reminders[1].seconds == 900 and db.reminders[1].output == "whisper")
-check("form clears its fields", textBox.text == "" and valueBox.text == "")
+r = db.reminders[2]
+check("ticked weekdays are stored", r and r.kind == "clock" and r.realm == true and #r.rep == 2 and r.rep[1] == 2 and r.rep[2] == 4 and r.output == "warning")
+check("picks stay for the next reminder", kinds.clock.checked and days[2].checked and outputs.warning.checked)
+for _, wday in ipairs(ns.WEEK_ORDER) do
+    if not days[wday].checked then click(days[wday]) end
+end
+typeInto(textBox, "Every day")
+typeInto(valueBox, "6:00")
+window:SaveForm()
+check("all weekdays ticked is every day", db.reminders[3].rep == true)
+
+-- Zone with the current zone and Every Time.
+click(kinds.zone)
+check("a zone shows Current Zone and clears the weekdays", hereButton.shown and not days[2].checked and preview.text == "Fires when you enter this zone or an area in it.")
+click(hereButton)
+check("Current Zone fills the field", valueBox.text == world.zone)
+-- The client fires OnTextChanged for text set from code too, with userInput false.
+valueBox.hooks.OnTextChanged(valueBox, false)
+check("a zone previews its next entry", preview.text == "Fires the next time you enter " .. world.zone .. ".")
+click(zoneRepeat)
+check("Every Time previews every entry", preview.text == "Fires every time you enter " .. world.zone .. ".")
+typeInto(textBox, "Home")
+window:SaveForm()
+check("a zone with Every Time is stored", db.reminders[4].kind == "zone" and db.reminders[4].rep == true)
+
+-- Editing.
+reset()
+click(kinds.timer)
+click(outputs.whisper)
+slash("in 15m Check mail")
 slash("at 20:30 print daily Raid")
 check("the list shows both reminders", #rows() == 2)
-
 local mail = rows()[1]
-mail.scripts.OnClick(mail)
-check("clicking a row loads it", textBox.text == "Check mail" and valueBox.text == "15m")
-check("a selection switches to editing", saveButton.text == "Save" and window.help.text:find("Change", 1, true))
+click(mail)
+check("clicking a row loads it", textBox.text == "Check mail" and valueBox.text == "15m" and kinds.timer.checked)
+check("a selection switches to editing", saveButton.text == "Save" and window.help.text:find("Changes save", 1, true))
 check("New and Delete turn on", not newButton.disabled and not deleteButton.disabled)
 check("the row shows as selected", mail.selection.shown and not mail.hover.shown)
 
 local mailReminder, mailDue = mail.reminder, mail.reminder.due
 world.now = NOW + 60
-textBox.text = "Check the mailbox"
+typeInto(textBox, "Check the mailbox")
 window:SaveForm()
 check("Save edits in place", #db.reminders == 2 and mailReminder.text == "Check the mailbox" and mailReminder.due == mailDue)
-check("Save stays on the reminder", saveButton.text == "Save" and rows()[1].reminder == mailReminder)
-valueBox.text = "1h"
+check("Save stays on the reminder and confirms", saveButton.text == "Save" and window.status.text == "Saved.")
+typeInto(valueBox, "1h")
 window:SaveForm()
 check("a new countdown restarts on Save", mailReminder.due == world.now + 3600)
 
-local raid = rows()[2]
-raid.scripts.OnClick(raid)
-check("a time of day loads its time", raid.reminder.kind == "clock" and valueBox.text == "20:30" and textBox.text == "Raid")
+-- Rows are pooled frames, so a refresh may give a frame another reminder. Keep the reminder.
+typeInto(textBox, "Mail again")
+local raid = rows()[2].reminder
+click(rows()[2])
+check("switching rows keeps the changes, as the macro window does", mailReminder.text == "Mail again")
+check("a daily time ticks every weekday", raid.kind == "clock" and valueBox.text == "20:30" and days[2].checked and days[1].checked)
+
+typeInto(valueBox, "25:99")
+click(rows()[1])
+check("an unreadable change is dropped on switching", raid.hour == 20 and raid.minute == 30)
+
+typeInto(textBox, "Closed edit")
+slash("")
+check("closing keeps the changes", mailReminder.text == "Closed edit")
+slash("")
 
 newButton.scripts.OnClick(newButton)
 check("New Reminder empties the editor", textBox.text == "" and valueBox.text == "" and saveButton.text == "Add Reminder")
-check("New Reminder clears the selection", not raid.selection.shown)
+check("New Reminder clears the selection and takes the keyboard", not rows()[1].selection.shown and focused == textBox)
 
 local target = rows()[1]
-target.scripts.OnClick(target)
+click(target)
 local deleting = target.reminder
-deleteButton.scripts.OnClick(deleteButton)
+click(deleteButton)
+check("Delete asks first and names the reminder", dialog.shown and dialog.subject.text == deleting.text and #db.reminders == 2)
+click(dialog.cancelButton)
+check("Cancel keeps the reminder", not dialog.shown and #db.reminders == 2 and saveButton.text == "Save")
+click(deleteButton)
+click(dialog.deleteButton)
 check("Delete removes the selected reminder", #db.reminders == 1 and not tContains(db.reminders, deleting))
-check("Delete returns to a new reminder", saveButton.text == "Add Reminder" and deleteButton.disabled)
+check("Delete returns to a new reminder", saveButton.text == "Add Reminder" and deleteButton.disabled and not dialog.shown)
 
 reset()
 slash("in 5m Tea")
 local tea = rows()[1]
-tea.scripts.OnClick(tea)
+click(tea)
 tick(300)
 check("a fired reminder leaves the editor, its text stays", saveButton.text == "Add Reminder" and textBox.text == "Tea")
 

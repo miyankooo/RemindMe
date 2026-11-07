@@ -20,6 +20,14 @@ local function setRepeat(rep)
     return function(spec) spec.rep = rep end
 end
 
+-- Weekdays add up, so "monday wednesday" repeats on both.
+local function addDay(wday)
+    return function(spec)
+        spec.days = spec.days or {}
+        spec.days[#spec.days + 1] = wday
+    end
+end
+
 -- Words that may stand between the trigger and the text, in any order.
 local OPTIONS = {
     whisper = setOutput("whisper"),
@@ -38,8 +46,8 @@ local OPTIONS = {
 -- "mon" works on an English client.
 for wday, name in ipairs(CALENDAR_WEEKDAY_NAMES) do
     local lower = strlower(name)
-    OPTIONS[lower] = setRepeat(wday)
-    if not lower:find("[\128-\255]") then OPTIONS[lower:sub(1, 3)] = setRepeat(wday) end
+    OPTIONS[lower] = addDay(wday)
+    if not lower:find("[\128-\255]") then OPTIONS[lower:sub(1, 3)] = addDay(wday) end
 end
 
 local USAGE = {
@@ -54,9 +62,14 @@ local function addFrom(spec, words, i)
         OPTIONS[strlower(words[i])](spec)
         i = i + 1
     end
-    if spec.kind ~= "clock" and type(spec.rep) == "number" then
-        say("Weekdays work only with /rm at.")
-        return
+    if spec.days then
+        if spec.kind ~= "clock" then
+            say("Weekdays work only with /rm at.")
+            return
+        end
+        -- daily wins over single days. Reminders.Add turns all seven into every day.
+        if spec.rep ~= true then spec.rep = spec.days end
+        spec.days = nil
     end
     spec.text = table.concat(words, " ", i)
     local r, problem = Reminders.Add(spec)
@@ -158,8 +171,8 @@ local HELP = {
     { "/rm at 20:30 <text>", "reminds you at a time of day, such as 8:30pm." },
     { "/rm zone Stormwind City: <text>", "reminds you when you enter a zone." },
     { "/rm here <text>", "reminds you when you come back to the zone you are in." },
-    { "Options", "go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or a weekday such as monday." },
-    { "/rm at 19:45 warning monday Raid tonight", "warns you every Monday." },
+    { "Options", "go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or weekdays such as monday wednesday." },
+    { "/rm at 19:45 warning monday wednesday Raid tonight", "warns you every Monday and Wednesday." },
     { "/rm list", "lists your reminders with numbers." },
     { "/rm edit 2", "opens reminder 2 in the window to change it." },
     { "/rm remove 2", "removes reminder 2. /rm test 2 shows it once now." },

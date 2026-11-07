@@ -23,6 +23,9 @@ ns.WEEK_ORDER = { 2, 3, 4, 5, 6, 7, 1 }
 -- turn, so a daily reminder never fires hours late. A one-time reminder always fires.
 ns.MISSED_GRACE = 60
 
+-- The snooze link in a fired reminder's chat line brings it back once after this long.
+ns.SNOOZE = 600
+
 function ns.trim(text)
     return (text or ""):match("^%s*(.-)%s*$")
 end

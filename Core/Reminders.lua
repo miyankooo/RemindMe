@@ -1,5 +1,6 @@
 local _, ns = ...
 
+local UI = LibStub("LibNativeUI-1.0")
 local Time = ns.Time
 
 local Reminders = {}
@@ -31,6 +32,25 @@ function Reminders.Sorted()
     return sorted
 end
 
+-- A time of day keeps its weekdays as a list in week order (Monday first), true for every day and
+-- false for once. A list of all seven becomes true and an empty one false, and the list is always new,
+-- so the stored reminder owns it. Countdowns and zones only repeat or not. A lone number is a weekday
+-- saved before several were possible.
+local function normalizeRep(r)
+    local rep = r.rep
+    if type(rep) == "number" then rep = { rep } end
+    if r.kind ~= "clock" or type(rep) ~= "table" then return rep and true or false end
+    local picked = {}
+    for _, wday in ipairs(rep) do picked[wday] = true end
+    local days = {}
+    for _, wday in ipairs(ns.WEEK_ORDER) do
+        if picked[wday] then days[#days + 1] = wday end
+    end
+    if #days == 0 then return false end
+    if #days == 7 then return true end
+    return days
+end
+
 -- Zone reminders have no due time, also after an edit turned a timed reminder into one.
 local function schedule(r, now)
     if r.kind == "timer" then
@@ -52,7 +72,17 @@ local function inZone(r)
     return false
 end
 
--- The trigger as a phrase, such as "in 12 Min" or "every Monday at 20:00 realm time, in 2 Day".
+-- Weekday names joined as a sentence reads them: "Monday", "Monday and Friday", "Monday, Wednesday
+-- and Friday".
+local function dayNames(days)
+    local names = {}
+    for i, wday in ipairs(days) do names[i] = CALENDAR_WEEKDAY_NAMES[wday] end
+    if #names == 1 then return names[1] end
+    return table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names]
+end
+
+-- The trigger as a phrase, such as "in 12 Min" or "every Monday and Friday at 20:00 realm time,
+-- next in 2 Day".
 function Reminders.Describe(r, now)
     if r.kind == "zone" then
         return (r.rep and "every time you enter " or "when you enter ") .. r.zone
@@ -64,11 +94,11 @@ function Reminders.Describe(r, now)
     local days = "at "
     if r.rep == true then
         days = "every day at "
-    elseif type(r.rep) == "number" then
-        days = "every " .. CALENDAR_WEEKDAY_NAMES[r.rep] .. " at "
+    elseif type(r.rep) == "table" then
+        days = "every " .. dayNames(r.rep) .. " at "
     end
     local clock = r.realm and " realm time, " or " local time, "
-    return days .. Time.FormatClock(r.hour, r.minute) .. clock .. left
+    return days .. Time.FormatClock(r.hour, r.minute) .. clock .. (r.rep and "next " or "") .. left
 end
 
 -- The output and the trigger, the line under the text in the window: "Whisper, in 12 Min".
@@ -84,12 +114,17 @@ local function addToChat(frame, line, info)
     frame:AddMessage(line, info.r, info.g, info.b, info.id)
 end
 
+-- A chat line's text with the snooze link after it, when the reminder fired for real.
+local function withLink(text, link)
+    return link and (text .. " " .. link) or text
+end
+
 -- A whisper from the addon itself, shown only on this client. A real whisper to yourself goes
 -- through SendChatMessage, which is restricted for addons on Forever (HasRestrictions) and prints a
 -- second "To" line. It lands in every open chat tab that shows whispers, with the whisper sound.
-local function whisper(text)
+local function whisper(text, link)
     local info = ChatTypeInfo.WHISPER
-    local line = CHAT_WHISPER_GET:format("[" .. ns.TITLE .. "]") .. text
+    local line = CHAT_WHISPER_GET:format("[" .. ns.TITLE .. "]") .. withLink(text, link)
     local shown = false
     FCF_IterateActiveChatWindows(function(frame)
         if frame:ContainsMessageGroup("WHISPER") then
@@ -103,24 +138,37 @@ local function whisper(text)
 end
 
 -- A system line in the main chat tab, as Blizzard's alarm clock prints its message.
-local function systemLine(text)
-    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.TITLE .. "]: " .. text, ChatTypeInfo.SYSTEM)
+local function systemLine(text, link)
+    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.TITLE .. "]: " .. withLink(text, link), ChatTypeInfo.SYSTEM)
 end
 
 -- As Blizzard's alarm clock fires (TimeManager_FireAlarm): the chat line, then the text across
 -- the screen centre in the raid warning frame. The icon codes and sound follow the frame's own
 -- CHAT_MSG_RAID_WARNING handler, so {star} shows the raid marker.
-local function warning(text)
-    systemLine(text)
+local function warning(text, link)
+    systemLine(text, link)
     RaidWarningUtil.AddMessage(C_ChatInfo.ReplaceIconAndGroupExpressions(text), ChatTypeInfo.RAID_WARNING)
     PlaySound(SOUNDKIT.RAID_WARNING)
 end
 
 local DELIVER = { whisper = whisper, print = systemLine, warning = warning }
 
--- The window previews an output with this, so the player sees and hears it before adding.
+-- The window previews an output with this, so the player sees and hears it before adding. A preview
+-- has no snooze link.
 function Reminders.Preview(output, text)
     DELIVER[output](text)
+end
+
+-- Snooze links of this session by number, each spent by its first click. The link also carries the
+-- session's start, so a link from before a /reload never snoozes a newer reminder with its number.
+local snoozes, session = {}, 0
+
+-- An addon link (|Haddon:...|h), which Blizzard's chat hands to the SetItemRef callback
+-- (ItemRefHandlersShared.lua), in the link colour Blizzard's own chat links use.
+local function snoozeLink(r)
+    snoozes[#snoozes + 1] = { text = r.text, output = r.output }
+    local label = "Snooze " .. Time.FormatLeft(ns.SNOOZE)
+    return LINK_FONT_COLOR:WrapTextInColorCode(("|Haddon:RemindMe:snooze:%d:%d|h[%s]|h"):format(session, #snoozes, label))
 end
 
 local function remove(r)
@@ -130,7 +178,7 @@ end
 
 -- Sends the reminder, then sets its next turn or removes it.
 function Reminders.Fire(r, now)
-    DELIVER[r.output](r.text)
+    DELIVER[r.output](r.text, snoozeLink(r))
     if r.rep then schedule(r, now) else remove(r) end
     ns.RefreshPanel()
 end
@@ -145,8 +193,16 @@ local function check(r)
         r.zone = ns.trim(r.zone)
         if r.zone == "" then return nil, ns.NEED_ZONE end
     end
-    r.rep = r.rep or false
+    r.rep = normalizeRep(r)
     r.output = DELIVER[r.output] and r.output or ns.DEFAULT_OUTPUT
+    return r
+end
+
+-- A scheduled copy of a trigger for the window's preview line. Nothing is checked or stored.
+function Reminders.Plan(spec, now)
+    local r = { kind = spec.kind, seconds = spec.seconds, hour = spec.hour, minute = spec.minute, realm = spec.realm, zone = spec.zone }
+    r.rep = normalizeRep(spec)
+    schedule(r, now)
     return r
 end
 
@@ -231,6 +287,24 @@ local function checkZones(fire)
     end
 end
 
+-- A click on a snooze link adds the reminder again as a one-time countdown, once per link.
+local function onLink(_, link)
+    local linkSession, number = link:match("^addon:RemindMe:snooze:(%d+):(%d+)$")
+    if not linkSession then return end
+    local entry = tonumber(linkSession) == session and snoozes[tonumber(number)] or nil
+    if not entry then
+        UI.Print(ns.TITLE, "This snooze link ended with the last reload or logout.")
+        return
+    end
+    if entry.spent then
+        UI.Print(ns.TITLE, "Already snoozed.")
+        return
+    end
+    entry.spent = true
+    local r = Reminders.Add({ kind = "timer", seconds = ns.SNOOZE, text = entry.text, output = entry.output })
+    UI.Print(ns.TITLE, "Snoozed for " .. Time.FormatLeft(ns.SNOOZE) .. ": " .. r.text .. ".")
+end
+
 -- Catches up on what came due while logged out. A one-time reminder fires on the first tick. A
 -- repeating one fires too if it came due moments ago, as across a /reload, and otherwise waits for
 -- its next turn. Time of day reminders are rescheduled from their stored time, which follows a
@@ -252,7 +326,10 @@ local ZONE_EVENTS = { "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_
 -- after the loading screen instead of under it. Logging in inside a reminder's zone counts as
 -- entering it.
 function Reminders.Start()
+    for _, r in ipairs(list()) do r.rep = normalizeRep(r) end
     catchUp()
+    session = GetServerTime()
+    EventRegistry:RegisterCallback("SetItemRef", onLink, Reminders)
     local events = CreateFrame("Frame")
     local ticker
     events:RegisterEvent("PLAYER_ENTERING_WORLD")

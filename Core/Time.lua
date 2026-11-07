@@ -118,12 +118,12 @@ local function candidate(r, now, days)
     return due, date("*t", due).wday
 end
 
--- The next moment after now that a time of day reminder is due. rep is a weekday (1 is Sunday)
--- for a weekly reminder, anything else matches every day.
+-- The next moment after now that a time of day reminder is due, and its weekday on the reminder's
+-- clock. rep lists the weekdays (1 is Sunday) of a weekly reminder, anything else matches every day.
 function Time.NextClock(r, now)
     for days = 0, 7 do
         local due, wday = candidate(r, now, days)
-        if due > now and (type(r.rep) ~= "number" or wday == r.rep) then return due end
+        if due > now and (type(r.rep) ~= "table" or tContains(r.rep, wday)) then return due, wday end
     end
 end
 
