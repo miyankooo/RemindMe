@@ -30,7 +30,7 @@ local chat, sounds, warnings = {}, {}, {}
 local ticker, focused
 
 -- === frame stub: unknown methods record and chain, a few keep state ===
-local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true }
+local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true, Bg = true, TopTileStreaks = true }
 local created = {}
 
 local function newRegion(kind, template)
@@ -67,6 +67,7 @@ local function newRegion(kind, template)
         CreateTexture = function() return newRegion("Texture") end,
         CreateFontString = function() return newRegion("FontString") end,
         SetEnabled = function(self, enabled) self.disabled = not enabled end,
+        SetColorTexture = function(self, r, g, b, a) self.colorTexture = { r, g, b, a } end,
         IsEnabled = function(self) return not self.disabled end,
         SetChecked = function(self, checked) self.checked = checked and true or false end,
         GetChecked = function(self) return self.checked or false end,
@@ -552,6 +553,11 @@ local function typeInto(box, text)
     box.hooks.OnTextChanged(box, true)
 end
 
+local bareInsets = not window.Inset.Bg.shown
+for _, frame in ipairs(created) do
+    if frame.template == "InsetFrameTemplate" and frame.Bg.shown then bareInsets = false end
+end
+check("the window keeps its stone, the inner panels only their border", window.Bg.colorTexture == nil and bareInsets)
 check("a new reminder is the start", saveButton.text == "Add Reminder" and window.help.text:find("Fill in", 1, true))
 check("the message takes the keyboard on open", focused == textBox)
 check("New and Delete wait for a selection", newButton.disabled and deleteButton.disabled)
