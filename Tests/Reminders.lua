@@ -33,7 +33,7 @@ local ticker, focused
 local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true, Bg = true, TopTileStreaks = true,
     NineSlice = true, BackgroundTile = true, BGCornerTopLeft = true, BGCornerTopRight = true, BGCornerBottomLeft = true,
     BGCornerBottomRight = true }
-local created = {}
+local created, textures = {}, {}
 
 local function newRegion(kind, template)
     local r = { kind = kind, template = template, scripts = {}, hooks = {}, shown = true, height = 0 }
@@ -66,7 +66,12 @@ local function newRegion(kind, template)
         AddMessage = function(self, line) chat[#chat + 1] = line end,
         ContainsMessageGroup = function() return true end,
         Cancel = function(self) self.cancelled = true end,
-        CreateTexture = function() return newRegion("Texture") end,
+        CreateTexture = function()
+            local texture = newRegion("Texture")
+            textures[#textures + 1] = texture
+            return texture
+        end,
+        SetAtlas = function(self, atlas) self.atlas = atlas end,
         CreateFontString = function() return newRegion("FontString") end,
         SetEnabled = function(self, enabled) self.disabled = not enabled end,
         SetColorTexture = function(self, r, g, b, a) self.colorTexture = { r, g, b, a } end,
@@ -568,6 +573,13 @@ local background = window.Background
 check("both columns sit on one brown panel, its corners hidden", background.template == "CollectionsBackgroundTemplate"
     and not background.BGCornerTopLeft.shown and not background.BGCornerBottomRight.shown
     and not window.Inset.Bg.shown and not window.Inset.NineSlice.shown)
+local dividers, columnDividers = 0, 0
+for _, texture in ipairs(textures) do
+    if texture.atlas == "Options_HorizontalDivider" then
+        if texture.rotation then columnDividers = columnDividers + 1 else dividers = dividers + 1 end
+    end
+end
+check("each of the four sections has its gold divider, one more splits the columns", dividers == 4 and columnDividers == 1)
 check("the window keeps its stone, only the status box is an inset", window.Bg.colorTexture == nil and bareInsets and insets == 1, insets)
 check("a new reminder is the start", saveButton.text == "Add Reminder" and window.help.text:find("Fill in", 1, true))
 check("the message takes the keyboard on open", focused == textBox)

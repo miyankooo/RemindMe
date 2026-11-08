@@ -111,8 +111,10 @@ local function CreateVerticalDivider(parent)
     return divider
 end
 
--- A titled block: a gold heading with its body one gap below. The caller sets the height to
+-- A window section, the way Blizzard's Settings panel heads one: a gold heading, its divider a tight step under it
+-- (Blizzard_SettingsList.xml, AddonList.xml), the body a tight step under that. The caller sets the height to
 -- SECTION_BODY_TOP plus the body's height.
+local SECTION_DIVIDER_TOP = 16
 local SECTION_BODY_TOP = 24
 local function CreateSection(parent, title)
     local section = CreateFrame("Frame", nil, parent)
@@ -120,6 +122,10 @@ local function CreateSection(parent, title)
     heading:SetPoint("TOPLEFT")
     heading:SetPoint("TOPRIGHT")
     heading:SetText(title)
+    local divider = section:CreateTexture(nil, "ARTWORK")
+    divider:SetAtlas("Options_HorizontalDivider", true)
+    divider:SetPoint("TOPLEFT", 0, -SECTION_DIVIDER_TOP)
+    divider:SetPoint("TOPRIGHT", 0, -SECTION_DIVIDER_TOP)
     section.body = CreateFrame("Frame", nil, section)
     section.body:SetPoint("TOPLEFT", 0, -SECTION_BODY_TOP)
     section.body:SetPoint("BOTTOMRIGHT")
