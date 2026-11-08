@@ -427,51 +427,55 @@ local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_B
 
 local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
 
--- The empty list says how to fill it, centred in the left column.
-local EMPTY_TEXT = "No reminders yet. Add one on the right."
+-- The window's player-facing text, kept in one table: as separate locals the panel builder would pass Lua 5.1's
+-- limit of 60 upvalues per function, and the client refuses to load the file.
+local TEXT = {
+    -- The empty list says how to fill it, centred in the left column.
+    EMPTY_TEXT = "No reminders yet. Add one on the right.",
 
--- The help tip stands right of the primary button, outside the window, until the first reminder is added.
-local TIP_TEXT = "Type a message and when it fires, then click Add Reminder to set it."
+    -- The help tip stands right of the primary button, outside the window, until the first reminder is added.
+    TIP_TEXT = "Type a message and when it fires, then click Add Reminder to set it.",
 
--- The attic line names the mode and the next step.
-local HELP_NEW = "Fill in a new reminder, or click one on the left to change it."
-local HELP_EDIT = "Changes save with Save, or when you pick another reminder or close the window."
+    -- The attic line names the mode and the next step.
+    HELP_NEW = "Fill in a new reminder, or click one on the left to change it.",
+    HELP_EDIT = "Changes save with Save, or when you pick another reminder or close the window.",
 
-local ADD_LABEL = "Add Reminder"
-local NEW_LABEL = "New Reminder"
+    ADD_LABEL = "Add Reminder",
+    NEW_LABEL = "New Reminder",
 
--- What the empty value field asks for under each trigger.
-local VALUE_HINTS = { timer = "30m or 1h 30m", clock = "20:30 or 8:30 PM", zone = "Stormwind City" }
+    -- What the empty value field asks for under each trigger.
+    VALUE_HINTS = { timer = "30m or 1h 30m", clock = "20:30 or 8:30 PM", zone = "Stormwind City" },
 
--- The preview line while the value field is empty: what the trigger does.
-local PREVIEW_HINTS = {
-    timer = "Fires once the countdown runs out.",
-    clock = "Fires once, or on every weekday you tick.",
-    zone = "Fires when you enter this zone or an area in it.",
+    -- The preview line while the value field is empty: what the trigger does.
+    PREVIEW_HINTS = {
+        timer = "Fires once the countdown runs out.",
+        clock = "Fires once, or on every weekday you tick.",
+        zone = "Fires when you enter this zone or an area in it.",
+    },
+
+    -- Tooltips for the choices, so each says what it does before it is picked.
+    KIND_TIPS = {
+        timer = "Fires once a countdown runs out, such as 30m or 1h 30m.",
+        clock = "Fires at a time of day, once or on the weekdays you tick.",
+        zone = "Fires when you enter a zone or an area in it, such as Stormwind or Trade District.",
+    },
+    OUTPUT_TIPS = {
+        whisper = "A pink whisper line in chat with the whisper sound. Only you see it.",
+        print = "A yellow line in your main chat tab, without a sound.",
+        warning = "Large text across the middle of the screen with the raid warning sound, and a chat line. Only you see it.",
+    },
+    TIMER_REPEAT_TIP = "Starts the countdown again each time it fires.",
+    ZONE_REPEAT_TIP = "Fires on every entry, not only the next one.",
+    LOCAL_TIME_TIP = "Use your computer's clock instead of the realm clock.",
+    DAY_TIP = "Fires on this day every week. With no day ticked, it fires once.",
+    MESSAGE_TIP = "What the reminder says when it fires.",
+    VALUE_TIPS = {
+        timer = "How long until it fires, such as 90s, 30m or 1h 30m.",
+        clock = "The time it fires, such as 20:30 or 8:30 PM.",
+        zone = "The zone or an area in it, such as Stormwind City or Trade District.",
+    },
+    INCOMPLETE_TIP = "Type a message and when it fires first.",
 }
-
--- Tooltips for the choices, so each says what it does before it is picked.
-local KIND_TIPS = {
-    timer = "Fires once a countdown runs out, such as 30m or 1h 30m.",
-    clock = "Fires at a time of day, once or on the weekdays you tick.",
-    zone = "Fires when you enter a zone or an area in it, such as Stormwind or Trade District.",
-}
-local OUTPUT_TIPS = {
-    whisper = "A pink whisper line in chat with the whisper sound. Only you see it.",
-    print = "A yellow line in your main chat tab, without a sound.",
-    warning = "Large text across the middle of the screen with the raid warning sound, and a chat line. Only you see it.",
-}
-local TIMER_REPEAT_TIP = "Starts the countdown again each time it fires."
-local ZONE_REPEAT_TIP = "Fires on every entry, not only the next one."
-local LOCAL_TIME_TIP = "Use your computer's clock instead of the realm clock."
-local DAY_TIP = "Fires on this day every week. With no day ticked, it fires once."
-local MESSAGE_TIP = "What the reminder says when it fires."
-local VALUE_TIPS = {
-    timer = "How long until it fires, such as 90s, 30m or 1h 30m.",
-    clock = "The time it fires, such as 20:30 or 8:30 PM.",
-    zone = "The zone or an area in it, such as Stormwind City or Trade District.",
-}
-local INCOMPLETE_TIP = "Type a message and when it fires first."
 
 local DIALOG_W = 400
 
@@ -696,7 +700,7 @@ local function buildPanel()
     listSection:SetPoint("TOPLEFT")
     listSection:SetPoint("TOPRIGHT")
 
-    local empty = CreateEmptyState(left, EMPTY_TEXT)
+    local empty = CreateEmptyState(left, TEXT.EMPTY_TEXT)
 
     -- Rows by list place, made on first need and hidden past the end of the list.
     local rows, shownRows = {}, 0
@@ -714,7 +718,7 @@ local function buildPanel()
     textBox:SetMaxLetters(255)
     textBox:SetPoint("LEFT", INPUT_CAP, 0)
     textBox:SetPoint("RIGHT")
-    hookTip(textBox, "Message", MESSAGE_TIP)
+    hookTip(textBox, "Message", TEXT.MESSAGE_TIP)
 
     -- When section, one section break below Message: the trigger radios, the value with what goes
     -- beside it, the weekdays of a time of day or the Every Time tick of a zone, and the preview line.
@@ -729,7 +733,7 @@ local function buildPanel()
 
     local kindRadios, previous = {}, nil
     for _, kind in ipairs(ns.KINDS) do
-        local radio = createRadio(kindSlot, ns.KIND_LABELS[kind], KIND_TIPS[kind])
+        local radio = createRadio(kindSlot, ns.KIND_LABELS[kind], TEXT.KIND_TIPS[kind])
         if previous then
             radio:SetPoint("LEFT", previous.label, "RIGHT", PADDING + RADIO_INSET, 0)
         else
@@ -739,30 +743,30 @@ local function buildPanel()
         previous = radio
     end
 
-    local valueBox = CreateHintBox(valueSlot, VALUE_HINTS[form.kind])
+    local valueBox = CreateHintBox(valueSlot, TEXT.VALUE_HINTS[form.kind])
     valueBox:SetMaxLetters(255)
     HookTooltip(valueBox, function(tooltip)
         GameTooltip_SetTitle(tooltip, ns.KIND_LABELS[form.kind])
-        GameTooltip_AddNormalLine(tooltip, VALUE_TIPS[form.kind], true)
+        GameTooltip_AddNormalLine(tooltip, TEXT.VALUE_TIPS[form.kind], true)
     end)
     local hereButton = CreateButton(valueSlot, "Current Zone")
     hereButton:SetPoint("RIGHT")
     hookTip(hereButton, "Current Zone", "Fills in the zone you are in.")
-    local timerRepeat = createCheck(valueSlot, "Repeat", TIMER_REPEAT_TIP)
+    local timerRepeat = createCheck(valueSlot, "Repeat", TEXT.TIMER_REPEAT_TIP)
     timerRepeat:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
-    local localCheck = createCheck(valueSlot, TIMEMANAGER_LOCALTIME, LOCAL_TIME_TIP)
+    local localCheck = createCheck(valueSlot, TIMEMANAGER_LOCALTIME, TEXT.LOCAL_TIME_TIP)
     localCheck:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
 
     -- Weekdays from Monday, three to a row.
     local dayChecks = {}
     for i, wday in ipairs(ns.WEEK_ORDER) do
-        local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday], DAY_TIP)
+        local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday], TEXT.DAY_TIP)
         local column, line = (i - 1) % DAY_COLUMNS, math.floor((i - 1) / DAY_COLUMNS)
         check:SetPoint("TOPLEFT", daysSlot, "TOPLEFT", column * DAY_W, -line * (ROW + TIGHT))
         dayChecks[wday] = check
     end
 
-    local zoneRepeat = createCheck(zoneSlot, "Every Time", ZONE_REPEAT_TIP)
+    local zoneRepeat = createCheck(zoneSlot, "Every Time", TEXT.ZONE_REPEAT_TIP)
     zoneRepeat:SetPoint("LEFT")
 
     local preview = CreateText(whenBody, GameFontHighlight)
@@ -778,7 +782,7 @@ local function buildPanel()
     setBodyHeight(outputSection, OUTPUTS_H)
     local outputRadios = {}
     for i, output in ipairs(ns.OUTPUTS) do
-        local radio = createRadio(outputSection.body, ns.OUTPUT_LABELS[output], OUTPUT_TIPS[output])
+        local radio = createRadio(outputSection.body, ns.OUTPUT_LABELS[output], TEXT.OUTPUT_TIPS[output])
         local middle = (i - 1) * (ROW + TIGHT) + ROW / 2
         radio:SetPoint("LEFT", outputSection.body, "TOPLEFT", RADIO_INSET, -middle)
         outputRadios[output] = radio
@@ -788,24 +792,24 @@ local function buildPanel()
     hookTip(testButton, "Test", "Shows the message once now, the way it arrives.")
 
     -- The primary button takes the bar's bottom-right corner and reads Save while editing.
-    local saveButton = AddBarButton(frame, ADD_LABEL, function() frame:SaveForm() end)
-    local newButton = AddBarButton(frame, NEW_LABEL, function() frame:NewReminder() end)
+    local saveButton = AddBarButton(frame, TEXT.ADD_LABEL, function() frame:SaveForm() end)
+    local newButton = AddBarButton(frame, TEXT.NEW_LABEL, function() frame:NewReminder() end)
     local deleteButton = createDeleteButton(frame)
     local status = createStatus(frame, deleteButton, newButton)
     local deleteDialog = createDeleteDialog()
 
     hookBarTip(saveButton, function()
-        if selected then return SAVE, "Keeps your changes to this reminder.", INCOMPLETE_TIP end
-        return ADD_LABEL, "Adds the reminder to the list on the left.", INCOMPLETE_TIP
+        if selected then return SAVE, "Keeps your changes to this reminder.", TEXT.INCOMPLETE_TIP end
+        return TEXT.ADD_LABEL, "Adds the reminder to the list on the left.", TEXT.INCOMPLETE_TIP
     end)
     hookBarTip(newButton, function()
-        return NEW_LABEL, "Empties the editor for a new reminder. Changes to the one shown are kept.",
+        return TEXT.NEW_LABEL, "Empties the editor for a new reminder. Changes to the one shown are kept.",
             "The editor already shows a new reminder."
     end)
     hookBarTip(deleteButton, function()
         return DELETE, "Removes the reminder shown in the editor, after asking.", "Click a reminder on the left first."
     end)
-    local showTip, retireTip = AttachTip(saveButton, TIP_TEXT, HelpTip.Point.RightEdgeCenter)
+    local showTip, retireTip = AttachTip(saveButton, TEXT.TIP_TEXT, HelpTip.Point.RightEdgeCenter)
     frame.showTip = showTip
 
     frame.kindRadios, frame.outputRadios, frame.dayChecks = kindRadios, outputRadios, dayChecks
@@ -888,7 +892,7 @@ local function buildPanel()
         elseif problem then
             preview:SetText(RED_FONT_COLOR:WrapTextInColorCode(problem))
         else
-            preview:SetText(GRAY_FONT_COLOR:WrapTextInColorCode(PREVIEW_HINTS[form.kind]))
+            preview:SetText(GRAY_FONT_COLOR:WrapTextInColorCode(TEXT.PREVIEW_HINTS[form.kind]))
         end
         saveButton:SetEnabled(readForm() ~= nil)
     end
@@ -901,7 +905,7 @@ local function buildPanel()
         zoneRepeat:SetChecked(form.rep)
         localCheck:SetChecked(not form.realm)
         for wday, check in pairs(dayChecks) do check:SetChecked(form.days[wday] == true) end
-        valueBox.Instructions:SetText(VALUE_HINTS[form.kind])
+        valueBox.Instructions:SetText(TEXT.VALUE_HINTS[form.kind])
         layoutWhen()
         refreshForm()
     end
@@ -935,8 +939,8 @@ local function buildPanel()
 
     -- The attic, the bar buttons and the row bars follow the editor's mode.
     local function refreshMode()
-        help:SetText(selected and HELP_EDIT or HELP_NEW)
-        saveButton:SetText(selected and SAVE or ADD_LABEL)
+        help:SetText(selected and TEXT.HELP_EDIT or TEXT.HELP_NEW)
+        saveButton:SetText(selected and SAVE or TEXT.ADD_LABEL)
         newButton:SetEnabled(selected ~= nil)
         deleteButton:SetEnabled(selected ~= nil)
         for i = 1, shownRows do rows[i].selected:SetShown(rows[i].reminder == selected) end
