@@ -405,7 +405,7 @@ local TIMER_REPEAT_TIP = "Starts the countdown again each time it fires."
 local ZONE_REPEAT_TIP = "Fires on every entry, not only the next one."
 local LOCAL_TIME_TIP = "Use your computer's clock instead of the realm clock."
 
-local DIALOG_W = 320
+local DIALOG_W = 400
 
 -- The picks a new reminder starts from. The clock follows the player's minimap clock setting.
 -- rep is the Repeat or Every Time tick, days the ticked weekdays of a time of day.
