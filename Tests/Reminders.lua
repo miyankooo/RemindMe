@@ -588,10 +588,13 @@ check("/rm help prints one line naming the commands", #chat == before + 1
 before = #chat
 slash("?")
 check("/rm ? is help", #chat == before + 1 and last():find("/rm help for this list.", 1, true))
+before = #chat
 slash("minimap")
-check("/rm minimap hides the button", db.minimap.hide == true)
+check("/rm minimap hides the button and says how to undo it", db.minimap.hide == true and #chat == before + 1
+    and last() == "<gold>[Remind Me Later]</gold>: Minimap button hidden. Type /rm minimap to show it again.")
+before = #chat
 slash("minimap")
-check("/rm minimap shows it again", db.minimap.hide == false)
+check("/rm minimap shows it again without a line", db.minimap.hide == false and #chat == before)
 
 -- === field text for editing ===
 check("duration field reads 1h 30m", Time.FormatDuration(5400) == "1h 30m")

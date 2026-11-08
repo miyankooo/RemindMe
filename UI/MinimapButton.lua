@@ -61,8 +61,9 @@ function ns.SetupLauncher()
 end
 
 -- /rm minimap flips only the minimap button. The addon menu entry always stays as the way back.
+-- Hiding says how to undo it; showing needs no line, since the button itself appears.
 function ns.ToggleMinimap()
     local show = RemindMeDB.minimap.hide
     setMinimapShown(show)
-    ns.Print(show and "Minimap button shown." or "Minimap button hidden. Type /rm minimap to show it again.")
+    if not show then ns.Print("Minimap button hidden. Type /rm minimap to show it again.") end
 end
