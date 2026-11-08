@@ -181,15 +181,24 @@ local function createWellScroll(well)
     return scroll
 end
 
--- The template's Inset becomes the left well and a second inset the right one, one gap apart and
--- both on Blizzard's own inset offsets.
+-- The template's Inset becomes the left column and a plain frame the right one, one gap apart on
+-- Blizzard's own inset offsets. The window's brown panel spans both, and the gold divider stood on end
+-- splits them in the middle of the gap, as high as the padded content.
 local function createColumns(frame)
     local left = frame.Inset
     left:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", PANEL_INSET_LEFT_OFFSET + COLUMN_W, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
 
-    local right = UI.CreateInset(frame)
+    local right = CreateFrame("Frame", nil, frame)
     right:SetPoint("TOPLEFT", left, "TOPRIGHT", UI.Space.gap, 0)
     right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", PANEL_INSET_RIGHT_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+
+    local background = frame.Background
+    background:ClearAllPoints()
+    background:SetPoint("TOPLEFT", left)
+    background:SetPoint("BOTTOMRIGHT", right)
+    local divider = UI.CreateVerticalDivider(background)
+    divider:SetPoint("TOP", left, "TOPRIGHT", UI.Space.gap / 2, -UI.Space.padding)
+    divider:SetPoint("BOTTOM", left, "BOTTOMRIGHT", UI.Space.gap / 2, UI.Space.padding)
     return left, right
 end
 

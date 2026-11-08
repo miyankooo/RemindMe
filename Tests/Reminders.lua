@@ -30,7 +30,9 @@ local chat, sounds, warnings = {}, {}, {}
 local ticker, focused
 
 -- === frame stub: unknown methods record and chain, a few keep state ===
-local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true, Bg = true, TopTileStreaks = true }
+local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true, Bg = true, TopTileStreaks = true,
+    NineSlice = true, BackgroundTile = true, BGCornerTopLeft = true, BGCornerTopRight = true, BGCornerBottomLeft = true,
+    BGCornerBottomRight = true }
 local created = {}
 
 local function newRegion(kind, template)
@@ -100,6 +102,8 @@ function CreateFrame(kind, name, parent, template)
 end
 
 UIParent = newRegion("Frame")
+-- Blizzard's quarter turns swap a texture's size and texture coordinates (Blizzard_SharedXMLBase/TextureUtil.lua).
+function SetClampedTextureRotation(texture, degrees) texture.rotation = degrees end
 DEFAULT_CHAT_FRAME = newRegion("ScrollingMessageFrame")
 GameTooltip = newRegion("GameTooltip")
 UISpecialFrames = {}
@@ -553,11 +557,18 @@ local function typeInto(box, text)
     box.hooks.OnTextChanged(box, true)
 end
 
-local bareInsets = not window.Inset.Bg.shown
+local bareInsets, insets = true, 0
 for _, frame in ipairs(created) do
-    if frame.template == "InsetFrameTemplate" and frame.Bg.shown then bareInsets = false end
+    if frame.template == "InsetFrameTemplate" then
+        insets = insets + 1
+        if frame.Bg.shown then bareInsets = false end
+    end
 end
-check("the window keeps its stone, the inner panels only their border", window.Bg.colorTexture == nil and bareInsets)
+local background = window.Background
+check("both columns sit on one brown panel, its corners hidden", background.template == "CollectionsBackgroundTemplate"
+    and not background.BGCornerTopLeft.shown and not background.BGCornerBottomRight.shown
+    and not window.Inset.Bg.shown and not window.Inset.NineSlice.shown)
+check("the window keeps its stone, only the status box is an inset", window.Bg.colorTexture == nil and bareInsets and insets == 1, insets)
 check("a new reminder is the start", saveButton.text == "Add Reminder" and window.help.text:find("Fill in", 1, true))
 check("the message takes the keyboard on open", focused == textBox)
 check("New and Delete wait for a selection", newButton.disabled and deleteButton.disabled)
