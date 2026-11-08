@@ -135,6 +135,34 @@ local function CreateScroll(parent, name)
     return scroll
 end
 
+-- A selectable row in a list on the brown panel, from the pet journal (Blizzard_Collections): the dark tile, the gold
+-- selection outline and the hover glow, stretched to the row. A name in heading over one muted detail line, both cut
+-- rather than wrapped. Rows are 44 tall, 4 apart, text 12 in from the sides and 8 from the top.
+local LIST_ROW, LIST_PITCH, LIST_INSET, LIST_TOP = 44, 48, 12, 8
+local function CreateListRow(parent, index)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(LIST_ROW)
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * LIST_PITCH)
+    row:SetPoint("TOPRIGHT", 0, -(index - 1) * LIST_PITCH)
+    local tile = row:CreateTexture(nil, "BACKGROUND")
+    tile:SetAtlas("PetList-ButtonBackground")
+    tile:SetAllPoints()
+    row.selected = row:CreateTexture(nil, "OVERLAY")
+    row.selected:SetAtlas("PetList-ButtonSelect")
+    row.selected:SetAllPoints()
+    row.selected:Hide()
+    row:SetHighlightAtlas("PetList-ButtonHighlight")
+    row.name = CreateText(row, GameFontNormal)
+    row.name:SetPoint("TOPLEFT", LIST_INSET, -LIST_TOP)
+    row.name:SetPoint("TOPRIGHT", -LIST_INSET, -LIST_TOP)
+    row.name:SetWordWrap(false)
+    row.detail = CreateText(row, GameFontDisable)
+    row.detail:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -4)
+    row.detail:SetPoint("TOPRIGHT", row.name, "BOTTOMRIGHT", 0, -4)
+    row.detail:SetWordWrap(false)
+    return row
+end
+
 -- The collections panel's ornaments, which a tool window leaves out.
 local BACKGROUND_CORNERS = { "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }
 
@@ -335,12 +363,6 @@ local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_B
 
 local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
 
--- A list row: the text over its trigger line, two heading-tall lines a tight gap apart with a tight
--- inset all round, so the hover and selection bars frame the text. Rows sit a tight gap apart.
-local ROW_INSET = TIGHT
-local ROW_H = 2 * HEADING + TIGHT + 2 * ROW_INSET
-local ROW_PITCH = ROW_H + TIGHT
-
 -- The empty list also teaches the chat command, in two lines.
 local EMPTY_TEXT = "Your reminders show here. To add one from chat, type /rm in 30m Stretch."
 local EMPTY_H = 2 * HEADING
@@ -523,40 +545,13 @@ local function fillRowTooltip(tooltip, row)
     GameTooltip_AddInstructionLine(tooltip, "Click to edit this reminder.")
 end
 
--- A selectable row with the hover and selection bars of Blizzard's Settings category list
--- (Blizzard_Settings_Shared/Blizzard_CategoryList.lua). The hover bar sits on the HIGHLIGHT layer,
--- which the button shows on mouse-over, and stays off on the selected row as it does there.
-local function createRow(parent, onClick)
-    local row = CreateFrame("Button", nil, parent)
-    row:SetHeight(ROW_H)
+-- A reminder's row at its place in the list: its text over its trigger line. A click loads it into
+-- the editor.
+local function createRow(parent, index, onClick)
+    local row = CreateListRow(parent, index)
     row:SetScript("OnClick", function() onClick(row.reminder) end)
     AttachTooltip(row, fillRowTooltip)
-
-    row.selection = row:CreateTexture(nil, "BACKGROUND")
-    row.selection:SetAtlas("Options_List_Active")
-    row.selection:SetAllPoints()
-
-    row.hover = row:CreateTexture(nil, "HIGHLIGHT")
-    row.hover:SetAtlas("Options_List_Hover")
-    row.hover:SetAllPoints()
-
-    row.text = CreateText(row, GameFontHighlight)
-    row.text:SetPoint("TOPLEFT", ROW_INSET, -ROW_INSET)
-    row.text:SetPoint("TOPRIGHT", -ROW_INSET, -ROW_INSET)
-    row.text:SetHeight(HEADING)
-    row.text:SetWordWrap(false)
-
-    row.detail = CreateText(row, GameFontDisable)
-    row.detail:SetPoint("TOPLEFT", row.text, "BOTTOMLEFT", 0, -TIGHT)
-    row.detail:SetPoint("TOPRIGHT", row.text, "BOTTOMRIGHT", 0, -TIGHT)
-    row.detail:SetHeight(HEADING)
-    row.detail:SetWordWrap(false)
     return row
-end
-
-local function setRowSelected(row, selected)
-    row.selection:SetShown(selected)
-    row.hover:SetShown(not selected)
 end
 
 -- The trigger in words: when a countdown or time of day fires next, or which entry a zone waits for.
@@ -612,7 +607,8 @@ local function buildPanel()
     empty:SetWordWrap(true)
     empty:SetText(EMPTY_TEXT)
 
-    local rows = { active = {}, pool = {} }
+    -- Rows by list place, made on first need and hidden past the end of the list.
+    local rows, shownRows = {}, 0
 
     -- Message section.
     local messageSection = CreateSection(right, "Message")
@@ -831,7 +827,7 @@ local function buildPanel()
         saveButton:SetText(selected and SAVE or ADD_LABEL)
         newButton:SetEnabled(selected ~= nil)
         deleteButton:SetEnabled(selected ~= nil)
-        for _, row in ipairs(rows.active) do setRowSelected(row, row.reminder == selected) end
+        for i = 1, shownRows do rows[i].selected:SetShown(rows[i].reminder == selected) end
     end
 
     local function clearFocus()
@@ -848,33 +844,28 @@ local function buildPanel()
     -- Countdowns tick down in place, without rebuilding the rows.
     function frame:RefreshTimes()
         local now = GetServerTime()
-        for _, row in ipairs(rows.active) do
-            row.detail:SetText(Reminders.Detail(row.reminder, now))
+        for i = 1, shownRows do
+            rows[i].detail:SetText(Reminders.Detail(rows[i].reminder, now))
         end
         self:RefreshStatus()
         refreshForm()
     end
 
     function frame:RefreshList()
-        for _, row in ipairs(rows.active) do
-            row:Hide()
-            rows.pool[#rows.pool + 1] = row
-        end
-        wipe(rows.active)
-
         local sorted = Reminders.Sorted()
         empty:SetShown(#sorted == 0)
         for i, r in ipairs(sorted) do
-            local row = table.remove(rows.pool) or createRow(listSection.body, function(picked) frame:Select(picked) end)
-            local y = -(i - 1) * ROW_PITCH
-            row:SetPoint("TOPLEFT", listSection.body, "TOPLEFT", 0, y)
-            row:SetPoint("TOPRIGHT", listSection.body, "TOPRIGHT", 0, y)
-            row.reminder = r
-            row.text:SetText(r.text)
-            row:Show()
-            rows.active[i] = row
+            rows[i] = rows[i] or createRow(listSection.body, i, function(picked) frame:Select(picked) end)
+            rows[i].reminder = r
+            rows[i].name:SetText(r.text)
+            rows[i]:Show()
         end
-        setBodyHeight(listSection, #sorted > 0 and #sorted * ROW_PITCH - TIGHT or EMPTY_H)
+        for i = #sorted + 1, #rows do
+            rows[i]:Hide()
+            rows[i].reminder = nil
+        end
+        shownRows = #sorted
+        setBodyHeight(listSection, #sorted > 0 and #sorted * LIST_PITCH - (LIST_PITCH - LIST_ROW) or EMPTY_H)
 
         -- A reminder that fired once or was removed by command leaves the editor. Its fields stay,
         -- so Add Reminder can bring it back.

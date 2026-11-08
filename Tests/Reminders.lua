@@ -648,7 +648,7 @@ click(mail)
 check("clicking a row loads it", textBox.text == "Check mail" and valueBox.text == "15m" and kinds.timer.checked)
 check("a selection switches to editing", saveButton.text == "Save" and window.help.text:find("Changes save", 1, true))
 check("New and Delete turn on", not newButton.disabled and not deleteButton.disabled)
-check("the row shows as selected", mail.selection.shown and not mail.hover.shown)
+check("the row shows as selected in the pet journal's style", mail.selected.shown and not rows()[2].selected.shown)
 
 local mailReminder, mailDue = mail.reminder, mail.reminder.due
 world.now = NOW + 60
@@ -678,7 +678,7 @@ slash("")
 
 newButton.scripts.OnClick(newButton)
 check("New Reminder empties the editor", textBox.text == "" and valueBox.text == "" and saveButton.text == "Add Reminder")
-check("New Reminder clears the selection and takes the keyboard", not rows()[1].selection.shown and focused == textBox)
+check("New Reminder clears the selection and takes the keyboard", not rows()[1].selected.shown and focused == textBox)
 
 local target = rows()[1]
 click(target)
