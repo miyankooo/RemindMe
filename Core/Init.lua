@@ -26,9 +26,19 @@ ns.MISSED_GRACE = 60
 -- The snooze link in a fired reminder's chat line brings it back once after this long.
 ns.SNOOZE = 600
 
--- Every chat line goes through here, behind the gold "[Remind Me Later]:" prefix.
+-- Every chat line goes through here: the bracketed title in the gold of Blizzard's own chat links,
+-- then the message in the chat frame's own colour.
 function ns.Print(message)
-    print(YELLOW_FONT_COLOR:WrapTextInColorCode("[" .. ns.title .. "]:") .. " " .. message)
+    print(NORMAL_FONT_COLOR:WrapTextInColorCode("[" .. ns.title .. "]") .. ": " .. message)
+end
+
+-- Another addon's link, or a chat line kept from restricted content, can be a secret value that
+-- raises on comparison. issecretvalue's own SecretArguments flag leaves open whether it raises for
+-- addon code, so pcall answers either way: a raise counts as secret, and nil never reaches it.
+function ns.CanAccess(value)
+    if value == nil then return true end
+    local ok, secret = pcall(issecretvalue, value)
+    return ok and not secret
 end
 
 function ns.trim(text)

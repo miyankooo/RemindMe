@@ -117,9 +117,8 @@ local function list()
         return
     end
     local now = GetServerTime()
-    ns.Print(ns.countLabel(#sorted, "reminder", "reminders") .. ":")
     for i, r in ipairs(sorted) do
-        print(i .. ". " .. Reminders.Summary(r, now))
+        ns.Print(i .. ". " .. Reminders.Summary(r, now) .. ".")
     end
 end
 
@@ -159,28 +158,12 @@ local function clear()
     ns.Print("Removed every reminder.")
 end
 
--- Each command with what it does, in the order a new player needs them.
-local HELP = {
-    { "/rm", "opens or closes the window." },
-    { "/rm in 30m <text>", "reminds you after a countdown, such as 90s, 45m or 1h 30m." },
-    { "/rm at 20:30 <text>", "reminds you at a time of day, such as 8:30pm." },
-    { "/rm zone Stormwind City: <text>", "reminds you when you enter a zone." },
-    { "/rm here <text>", "reminds you when you come back to the zone you are in." },
-    { "Options", "go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or weekdays such as monday wednesday." },
-    { "/rm at 19:45 warning monday wednesday Raid tonight", "warns you every Monday and Wednesday." },
-    { "/rm list", "lists your reminders with numbers." },
-    { "/rm edit 2", "opens reminder 2 in the window to change it." },
-    { "/rm remove 2", "removes reminder 2. /rm test 2 shows it once now." },
-    { "/rm clear", "removes every reminder." },
-    { "/rm minimap", "hides or shows the minimap button." },
-}
-
-local function help()
-    ns.Print("Commands:")
-    for _, entry in ipairs(HELP) do
-        print(YELLOW_FONT_COLOR:WrapTextInColorCode(entry[1]) .. " " .. entry[2])
-    end
-end
+-- Every command in one line, in the order a new player needs them, then the options.
+local HELP = "Type /rm to open the window, /rm in 30m <text>, /rm at 20:30 <text> or /rm zone Stormwind City: <text>"
+    .. " to add a reminder, /rm here <text> for the zone you are in, /rm list, /rm edit 2, /rm test 2, /rm remove 2"
+    .. " or /rm clear to manage them, /rm minimap to show or hide the minimap button, or /rm help for this list."
+    .. " Options go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or"
+    .. " weekdays such as monday wednesday."
 
 -- A bare /rm toggles the window, the first word picks the command.
 local function handleSlash(msg)
@@ -211,7 +194,7 @@ local function handleSlash(msg)
     elseif command == "minimap" then
         ns.ToggleMinimap()
     elseif command == "help" or command == "?" then
-        help()
+        ns.Print(HELP)
     else
         ns.Print("Unknown command. Type /rm help for the list.")
     end

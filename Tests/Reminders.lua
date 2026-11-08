@@ -133,11 +133,22 @@ local function color()
         GetRGB = function() return 1, 1, 1 end,
     }
 end
-NORMAL_FONT_COLOR, HIGHLIGHT_FONT_COLOR, GRAY_FONT_COLOR = color(), color(), color()
+HIGHLIGHT_FONT_COLOR, GRAY_FONT_COLOR = color(), color()
 GREEN_FONT_COLOR, RED_FONT_COLOR, WARNING_FONT_COLOR, YELLOW_FONT_COLOR = color(), color(), color(), color()
 local function font() return { GetFont = function() return "Fonts\\FRIZQT__.TTF", 12 end } end
 GameFontNormalLarge, GameFontNormal, GameFontHighlight, GameFontDisable = font(), font(), font(), font()
-LINK_FONT_COLOR = color()
+-- Gold marks the text NORMAL_FONT_COLOR wraps, so the checks see what is coloured.
+NORMAL_FONT_COLOR = { WrapTextInColorCode = function(_, text) return "<gold>" .. text .. "</gold>" end, GetRGB = function() return 1, 0.82, 0 end }
+LinkTypes = { AddOn = "addon" }
+-- Blizzard's own formatter (LinkUtil.lua).
+LinkUtil = {
+    FormatLink = function(linkType, text, ...)
+        return table.concat({ ("|H%s"):format(linkType), ... }, ":") .. ("|h%s|h"):format(text)
+    end,
+}
+-- A table stands in for a secret value, which issecretvalue reports.
+local SECRET = {}
+function issecretvalue(value) return value == SECRET end
 SCROLL_FRAME_SCROLL_BAR_OFFSET_LEFT = 6
 PANEL_INSET_LEFT_OFFSET, PANEL_INSET_RIGHT_OFFSET = 4, -6
 PANEL_INSET_BOTTOM_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET = 4, 26
@@ -393,7 +404,8 @@ reset()
 Reminders.Add({ kind = "timer", seconds = 5, text = "Tea", output = "print" })
 tick(5)
 local link = last():match("|H(addon:RemindMe:snooze:[%d:]+)|h")
-check("the fired line links a snooze", link ~= nil and #db.reminders == 0)
+check("the fired line links a snooze in gold", link ~= nil and #db.reminders == 0
+    and last():find("<gold>|H" .. link .. "|h[Snooze 600s]|h</gold>", 1, true) ~= nil)
 clickLink(link)
 r = db.reminders[1]
 check("snooze adds the reminder again as a one-time countdown", #db.reminders == 1 and r.kind == "timer"
@@ -406,6 +418,8 @@ check("a link from before a reload is refused", #db.reminders == 1 and last():fi
 local before = #chat
 clickLink("item:6948")
 check("other links are left alone", #chat == before)
+clickLink(SECRET)
+check("a secret link is left alone", #chat == before)
 
 -- === catch-up at login ===
 reset()
@@ -475,13 +489,13 @@ check("/rm in without text explains", last():find(ns.NEED_TEXT, 1, true) ~= nil)
 slash("in 5m monday tea")
 check("weekday on a countdown refused", last():find("Weekdays", 1, true) ~= nil and #db.reminders == 0)
 slash("bogus")
-check("unknown command points to help", last():find("/rm help", 1, true) ~= nil)
+check("unknown command points to help", last() == "<gold>[Remind Me Later]</gold>: Unknown command. Type /rm help for the list.")
 
 reset()
 slash("in 10m First")
 slash("in 5m Second")
 slash("list")
-check("/rm list sorts by due time", chat[#chat - 1]:find("^1%. Second") and last():find("^2%. First"))
+check("/rm list sorts by due time, one chat line each", chat[#chat - 1]:find("</gold>: 1%. Second") and last():find("</gold>: 2%. First"))
 slash("test 1")
 check("/rm test shows without removing", last() == "[Remind Me Later] whispers: Second" and #db.reminders == 2)
 slash("remove 1")
@@ -490,8 +504,14 @@ slash("remove 9")
 check("/rm remove with a bad number explains", last():find("/rm list", 1, true) ~= nil)
 slash("clear")
 check("/rm clear empties", #db.reminders == 0)
+before = #chat
 slash("help")
-check("/rm help prints the commands", #chat > 8)
+check("/rm help prints one line naming the commands", #chat == before + 1
+    and starts(last(), "<gold>[Remind Me Later]</gold>: Type /rm to open the window,")
+    and last():find("/rm minimap", 1, true) and last():find("/rm help for this list.", 1, true))
+before = #chat
+slash("?")
+check("/rm ? is help", #chat == before + 1 and last():find("/rm help for this list.", 1, true))
 slash("minimap")
 check("/rm minimap hides the button", db.minimap.hide == true)
 slash("minimap")

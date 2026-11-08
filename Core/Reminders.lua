@@ -1,4 +1,4 @@
-local _, ns = ...
+local addonName, ns = ...
 
 local Time = ns.Time
 
@@ -162,12 +162,14 @@ end
 -- session's start, so a link from before a /reload never snoozes a newer reminder with its number.
 local snoozes, session = {}, 0
 
--- An addon link (|Haddon:...|h), which Blizzard's chat hands to the SetItemRef callback
--- (ItemRefHandlersShared.lua), in the link colour Blizzard's own chat links use.
+-- An addon link (|Haddon:RemindMe:snooze:<session>:<n>|h), which Blizzard's chat hands to the
+-- SetItemRef callback (ItemRefHandlersShared.lua), in the gold of Blizzard's own chat links such as
+-- club invites (ItemRef.lua) and of the welcome line's link.
+local SNOOZE_PATTERN = "^" .. LinkTypes.AddOn .. ":" .. addonName .. ":snooze:(%d+):(%d+)$"
 local function snoozeLink(r)
     snoozes[#snoozes + 1] = { text = r.text, output = r.output }
-    local label = "Snooze " .. Time.FormatLeft(ns.SNOOZE)
-    return LINK_FONT_COLOR:WrapTextInColorCode(("|Haddon:RemindMe:snooze:%d:%d|h[%s]|h"):format(session, #snoozes, label))
+    local label = "[Snooze " .. Time.FormatLeft(ns.SNOOZE) .. "]"
+    return NORMAL_FONT_COLOR:WrapTextInColorCode(LinkUtil.FormatLink(LinkTypes.AddOn, label, addonName, "snooze", session, #snoozes))
 end
 
 local function remove(r)
@@ -286,9 +288,11 @@ local function checkZones(fire)
     end
 end
 
--- A click on a snooze link adds the reminder again as a one-time countdown, once per link.
+-- A click on a snooze link adds the reminder again as a one-time countdown, once per link. Every
+-- addon's link arrives here, and another addon's may be secret, so it is checked first.
 local function onLink(_, link)
-    local linkSession, number = link:match("^addon:RemindMe:snooze:(%d+):(%d+)$")
+    if not ns.CanAccess(link) or type(link) ~= "string" then return end
+    local linkSession, number = link:match(SNOOZE_PATTERN)
     if not linkSession then return end
     local entry = tonumber(linkSession) == session and snoozes[tonumber(number)] or nil
     if not entry then
