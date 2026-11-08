@@ -1,6 +1,5 @@
 local _, ns = ...
 
-local UI = LibStub("LibNativeUI-1.0")
 local Time = ns.Time
 
 local Reminders = {}
@@ -124,7 +123,7 @@ end
 -- second "To" line. It lands in every open chat tab that shows whispers, with the whisper sound.
 local function whisper(text, link)
     local info = ChatTypeInfo.WHISPER
-    local line = CHAT_WHISPER_GET:format("[" .. ns.TITLE .. "]") .. withLink(text, link)
+    local line = CHAT_WHISPER_GET:format("[" .. ns.title .. "]") .. withLink(text, link)
     local shown = false
     FCF_IterateActiveChatWindows(function(frame)
         if frame:ContainsMessageGroup("WHISPER") then
@@ -139,7 +138,7 @@ end
 
 -- A system line in the main chat tab, as Blizzard's alarm clock prints its message.
 local function systemLine(text, link)
-    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.TITLE .. "]: " .. withLink(text, link), ChatTypeInfo.SYSTEM)
+    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.title .. "]: " .. withLink(text, link), ChatTypeInfo.SYSTEM)
 end
 
 -- As Blizzard's alarm clock fires (TimeManager_FireAlarm): the chat line, then the text across
@@ -293,16 +292,16 @@ local function onLink(_, link)
     if not linkSession then return end
     local entry = tonumber(linkSession) == session and snoozes[tonumber(number)] or nil
     if not entry then
-        UI.Print(ns.TITLE, "This snooze link ended with the last reload or logout.")
+        ns.Print("This snooze link ended with the last reload or logout.")
         return
     end
     if entry.spent then
-        UI.Print(ns.TITLE, "Already snoozed.")
+        ns.Print("Already snoozed.")
         return
     end
     entry.spent = true
     local r = Reminders.Add({ kind = "timer", seconds = ns.SNOOZE, text = entry.text, output = entry.output })
-    UI.Print(ns.TITLE, "Snoozed for " .. Time.FormatLeft(ns.SNOOZE) .. ": " .. r.text .. ".")
+    ns.Print("Snoozed for " .. Time.FormatLeft(ns.SNOOZE) .. ": " .. r.text .. ".")
 end
 
 -- Catches up on what came due while logged out. A one-time reminder fires on the first tick. A

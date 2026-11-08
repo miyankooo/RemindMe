@@ -146,6 +146,7 @@ CALENDAR_WEEKDAY_NAMES = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday
 ChatTypeInfo = { WHISPER = { r = 1, g = 0.5, b = 1, id = 7 }, SYSTEM = { r = 1, g = 1, b = 0, id = 1 }, RAID_WARNING = { r = 1, g = 0.3, b = 0, id = 9 } }
 SOUNDKIT = { TELL_MESSAGE = 3081, RAID_WARNING = 8959 }
 SlashCmdList = {}
+C_AddOns = { GetAddOnMetadata = function(_, field) return field == "Title" and "Remind Me Later" or nil end }
 
 function GetCVarBool(name) return name == "timeMgrUseLocalTime" and world.localTime end
 function GetServerTime() return world.now end
@@ -192,13 +193,12 @@ function ButtonFrameTemplate_HideAttic() end
 function ButtonFrameTemplate_HideButtonBar() end
 function MagicButton_OnLoad() end
 
--- === libraries: the real LibStub and LibNativeUI, fake broker and icon ===
+-- === libraries: the real LibStub, fake broker and icon ===
 local function load(path, ns)
     local chunk = assert(loadfile(ADDON .. path))
     chunk("RemindMe", ns)
 end
 load("Libs/LibStub/LibStub.lua")
-load("Libs/LibNativeUI-1.0/LibNativeUI-1.0.lua")
 local broker = LibStub:NewLibrary("LibDataBroker-1.1", 1)
 function broker:NewDataObject(_, object) return object end
 local icon = LibStub:NewLibrary("LibDBIcon-1.0", 1)

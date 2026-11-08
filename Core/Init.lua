@@ -1,8 +1,8 @@
-local _, ns = ...
+local addonName, ns = ...
 
--- Spaced name for everything the player reads: the window title, the chat prefix and the
--- launcher, whose LibDataBroker name it also is.
-ns.TITLE = "Remind Me Later"
+-- The toc Title, the name for everything the player reads: the window title, the chat prefix and
+-- the launcher, whose LibDataBroker name it also is.
+ns.title = C_AddOns.GetAddOnMetadata(addonName, "Title")
 
 -- The bell from the toc's IconTexture, file 133706.
 ns.ICON = "Interface\\Icons\\INV_Misc_Bell_01"
@@ -25,6 +25,11 @@ ns.MISSED_GRACE = 60
 
 -- The snooze link in a fired reminder's chat line brings it back once after this long.
 ns.SNOOZE = 600
+
+-- Every chat line goes through here, behind the gold "[Remind Me Later]:" prefix.
+function ns.Print(message)
+    print(YELLOW_FONT_COLOR:WrapTextInColorCode("[" .. ns.title .. "]:") .. " " .. message)
+end
 
 function ns.trim(text)
     return (text or ""):match("^%s*(.-)%s*$")

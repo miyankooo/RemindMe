@@ -1,12 +1,7 @@
 local _, ns = ...
 
-local UI = LibStub("LibNativeUI-1.0")
 local Time = ns.Time
 local Reminders = ns.Reminders
-
-local function say(message)
-    UI.Print(ns.TITLE, message)
-end
 
 local function setOutput(output)
     return function(spec) spec.output = output end
@@ -64,7 +59,7 @@ local function addFrom(spec, words, i)
     end
     if spec.days then
         if spec.kind ~= "clock" then
-            say("Weekdays work only with /rm at.")
+            ns.Print("Weekdays work only with /rm at.")
             return
         end
         -- daily wins over single days. Reminders.Add turns all seven into every day.
@@ -74,16 +69,16 @@ local function addFrom(spec, words, i)
     spec.text = table.concat(words, " ", i)
     local r, problem = Reminders.Add(spec)
     if not r then
-        say(problem .. " " .. USAGE[spec.kind])
+        ns.Print(problem .. " " .. USAGE[spec.kind])
         return
     end
-    say("Added: " .. Reminders.Summary(r, GetServerTime()) .. ".")
+    ns.Print("Added: " .. Reminders.Summary(r, GetServerTime()) .. ".")
 end
 
 local function addTimer(words)
     local seconds, i = Time.TakeDuration(words, 2)
     if not seconds then
-        say(ns.NEED_DURATION .. " " .. USAGE.timer)
+        ns.Print(ns.NEED_DURATION .. " " .. USAGE.timer)
         return
     end
     addFrom({ kind = "timer", seconds = seconds }, words, i)
@@ -92,7 +87,7 @@ end
 local function addClock(words)
     local hour, minute, i = Time.TakeClock(words, 2)
     if not hour then
-        say(ns.NEED_CLOCK .. " " .. USAGE.clock)
+        ns.Print(ns.NEED_CLOCK .. " " .. USAGE.clock)
         return
     end
     addFrom({ kind = "clock", hour = hour, minute = minute, realm = ns.DefaultRealm() }, words, i)
@@ -109,7 +104,7 @@ end
 local function addHere(words)
     local zone = GetZoneText()
     if zone == "" then
-        say("Your zone has no name right now. Try again in a moment.")
+        ns.Print("Your zone has no name right now. Try again in a moment.")
         return
     end
     addFrom({ kind = "zone", zone = zone }, words, 2)
@@ -118,11 +113,11 @@ end
 local function list()
     local sorted = Reminders.Sorted()
     if #sorted == 0 then
-        say("No reminders. Type /rm to add one.")
+        ns.Print("No reminders. Type /rm to add one.")
         return
     end
     local now = GetServerTime()
-    say(ns.countLabel(#sorted, "reminder", "reminders") .. ":")
+    ns.Print(ns.countLabel(#sorted, "reminder", "reminders") .. ":")
     for i, r in ipairs(sorted) do
         print(i .. ". " .. Reminders.Summary(r, now))
     end
@@ -133,7 +128,7 @@ local function pick(word)
     local sorted = Reminders.Sorted()
     local r = sorted[tonumber(word or "")]
     if not r then
-        say(#sorted == 0 and "No reminders." or "Pick a number from /rm list, such as /rm remove 1.")
+        ns.Print(#sorted == 0 and "No reminders." or "Pick a number from /rm list, such as /rm remove 1.")
     end
     return r
 end
@@ -142,7 +137,7 @@ local function removeAt(word)
     local r = pick(word)
     if not r then return end
     Reminders.Remove(r)
-    say("Removed: " .. r.text .. ".")
+    ns.Print("Removed: " .. r.text .. ".")
 end
 
 local function editAt(word)
@@ -157,11 +152,11 @@ end
 
 local function clear()
     if #Reminders.Sorted() == 0 then
-        say("No reminders to remove.")
+        ns.Print("No reminders to remove.")
         return
     end
     Reminders.Clear()
-    say("Removed every reminder.")
+    ns.Print("Removed every reminder.")
 end
 
 -- Each command with what it does, in the order a new player needs them.
@@ -181,9 +176,9 @@ local HELP = {
 }
 
 local function help()
-    say("Commands:")
+    ns.Print("Commands:")
     for _, entry in ipairs(HELP) do
-        print(UI.Color.prefix:WrapTextInColorCode(entry[1]) .. " " .. entry[2])
+        print(YELLOW_FONT_COLOR:WrapTextInColorCode(entry[1]) .. " " .. entry[2])
     end
 end
 
@@ -218,8 +213,9 @@ local function handleSlash(msg)
     elseif command == "help" or command == "?" then
         help()
     else
-        say("Unknown command. Type /rm help for the list.")
+        ns.Print("Unknown command. Type /rm help for the list.")
     end
 end
 
-UI.RegisterSlash("REMINDME", { "/remindme", "/rm" }, handleSlash)
+SLASH_REMINDME1, SLASH_REMINDME2 = "/remindme", "/rm"
+SlashCmdList.REMINDME = handleSlash

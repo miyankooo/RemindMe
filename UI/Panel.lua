@@ -1,60 +1,349 @@
 local _, ns = ...
 
-local UI = LibStub("LibNativeUI-1.0")
 local Time = ns.Time
 local Reminders = ns.Reminders
 
+-- Spacing roles on the 4 px grid: tight from label to control, gap between related controls, padding
+-- inside a column. Rows, checkboxes and content buttons are 24 tall, a heading line 16.
+local TIGHT, GAP, PADDING = 4, 8, 16
+local ROW, HEADING = 24, 16
+
+-- InputBoxTemplate draws its left cap 5 px outside the box (Shared/InputBox/InputBoxTemplates.xml:49),
+-- so a box sits in by that much to line its art up with the column.
+local INPUT_CAP = 5
+
+-- The right margin a ScrollFrameTemplate leaves for its bar: SCROLL_FRAME_SCROLL_BAR_OFFSET_LEFT 6, the
+-- 8 px bar and a gap, rounded up to the grid.
+local SCROLL_GUTTER = 24
+
+-- Text in a font role: GameFontNormal (heading, gold), GameFontHighlight (body, white), GameFontDisable (muted,
+-- grey), GameFontNormalLarge (title, 16 px, a dialog's subject line only).
+local function CreateText(parent, fontObject, layer)
+    local text = parent:CreateFontString(nil, layer or "ARTWORK")
+    text:SetFontObject(fontObject or GameFontHighlight)
+    text:SetJustifyH("LEFT")
+    return text
+end
+
+-- A GameTooltip owned by the hovered frame, filled with Blizzard's GameTooltip_* line helpers. A frame whose
+-- template already sets OnEnter gets HookScript instead.
+local function AttachTooltip(frame, fill, anchor)
+    frame:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+        fill(GameTooltip, self)
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", GameTooltip_Hide)
+end
+
+-- Rounds a length derived from text up to the 4 px grid.
+local function Snap(length)
+    return math.ceil(length / 4) * 4
+end
+
+-- A content button one row (24) tall. Without a width it fits its label the way UIPanelButtonTemplate's FitToText
+-- does (text plus 40, SecureUIPanelTemplates.xml:42), at least 64, rounded up to 8 so neighbours share widths.
+local function CreateButton(parent, label, width)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetText(label)
+    width = width or math.max(64, math.ceil((button:GetTextWidth() + 40) / 8) * 8)
+    button:SetSize(width, 24)
+    return button
+end
+
+-- CheckboxWithLabelTemplate: the minimal art Blizzard's Settings use, at the 24 px AddonList gives it
+-- (Blizzard_AddOnList/AddonList.xml:73-74). The label joins the hit rect, so a click on it toggles the box.
+local function CreateCheckbox(parent, label)
+    local checkbox = CreateFrame("CheckButton", nil, parent, "CheckboxWithLabelTemplate")
+    checkbox:SetSize(24, 24)
+    checkbox.Text:SetFontObject(GameFontHighlight)
+    checkbox.Text:ClearAllPoints()
+    checkbox.Text:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+    checkbox.Text:SetText(label)
+    checkbox:SetHitRectInsets(0, -(4 + checkbox.Text:GetStringWidth()), 0, 0)
+    return checkbox
+end
+
+-- UIRadioButtonTemplate, 16 px, centred in a 24 px row like the checkbox, with the same clickable body label.
+-- The caller unchecks the other radios of its group in OnClick.
+local RADIO_SIZE = 16
+local RADIO_INSET = (24 - RADIO_SIZE) / 2
+local function CreateRadio(parent, label)
+    local radio = CreateFrame("CheckButton", nil, parent, "UIRadioButtonTemplate")
+    radio.label = CreateText(radio, GameFontHighlight)
+    radio.label:SetPoint("LEFT", radio, "RIGHT", 4 + RADIO_INSET, 0)
+    radio.label:SetText(label)
+    radio:SetHitRectInsets(0, -(4 + RADIO_INSET + radio.label:GetStringWidth()), 0, 0)
+    return radio
+end
+
+-- InputBoxInstructionsTemplate: the same box plus Blizzard's grey hint, so an empty field says what it takes.
+-- The hint moves to the muted font where typed text starts, keeping the template's grey.
+local function CreateHintBox(parent, hint, width)
+    local box = CreateFrame("EditBox", nil, parent, "InputBoxInstructionsTemplate")
+    box:SetSize(width or 160, 20)
+    box:SetAutoFocus(false)
+    box:SetFontObject(GameFontHighlight)
+    local r, g, b = box.Instructions:GetTextColor()
+    box.Instructions:SetFontObject(GameFontDisable)
+    box.Instructions:SetTextColor(r, g, b)
+    box.Instructions:ClearAllPoints()
+    box.Instructions:SetAllPoints()
+    box.Instructions:SetText(hint)
+    return box
+end
+
+-- An inset's border on the stone without its marble tile, as the Auction House category list
+-- (Blizzard_AuctionHouseCategoriesList.xml:60). For a status box in the button bar or a block on a settings page,
+-- never on the brown panel.
+local function CreateInset(parent)
+    local inset = CreateFrame("Frame", nil, parent, "InsetFrameTemplate")
+    inset.Bg:Hide()
+    return inset
+end
+
+-- The gold Settings divider stood on end, to split the brown panel into columns. SetClampedTextureRotation turns it
+-- a quarter and swaps its size (Blizzard_SharedXMLBase/TextureUtil.lua). The caller anchors its top and bottom.
+local function CreateVerticalDivider(parent)
+    local divider = parent:CreateTexture(nil, "ARTWORK")
+    divider:SetAtlas("Options_HorizontalDivider", true)
+    SetClampedTextureRotation(divider, 90)
+    return divider
+end
+
+-- A titled block: a gold heading with its body one gap below. The caller sets the height to
+-- SECTION_BODY_TOP plus the body's height.
+local SECTION_BODY_TOP = 24
+local function CreateSection(parent, title)
+    local section = CreateFrame("Frame", nil, parent)
+    local heading = CreateText(section, GameFontNormal)
+    heading:SetPoint("TOPLEFT")
+    heading:SetPoint("TOPRIGHT")
+    heading:SetText(title)
+    section.body = CreateFrame("Frame", nil, section)
+    section.body:SetPoint("TOPLEFT", 0, -SECTION_BODY_TOP)
+    section.body:SetPoint("BOTTOMRIGHT")
+    return section
+end
+
+-- A ScrollFrameTemplate with its scroll child. Leave the 24 px gutter free on its right for the bar.
+local function CreateScroll(parent, name)
+    local scroll = CreateFrame("ScrollFrame", name, parent, "ScrollFrameTemplate")
+    scroll.content = CreateFrame("Frame", nil, scroll)
+    scroll.content:SetSize(1, 1)
+    scroll:SetScrollChild(scroll.content)
+    return scroll
+end
+
+-- The collections panel's ornaments, which a tool window leaves out.
+local BACKGROUND_CORNERS = { "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }
+
+-- Restores a saved position, or centres the frame.
+local function RestorePosition(frame, position)
+    frame:ClearAllPoints()
+    if position and position.point then
+        frame:SetPoint(position.point, UIParent, position.relPoint or position.point, position.x or 0, position.y or 0)
+    else
+        frame:SetPoint("CENTER")
+    end
+end
+
+-- Windows and dialogs: toplevel, clamped, dragged with the left button, closed by Escape through UISpecialFrames,
+-- never UIPanelWindows, so they never drive Blizzard's panel layout.
+local function MakeMovable(frame, name, strata, position)
+    frame:SetFrameStrata(strata)
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if position then
+            local point, _, relPoint, x, y = self:GetPoint(1)
+            position.point, position.relPoint, position.x, position.y = point, relPoint, x, y
+        end
+    end)
+    RestorePosition(frame, position)
+    frame:Hide()
+    tinsert(UISpecialFrames, name)
+end
+
+-- A tool window on ButtonFrameTemplate: portrait, title, close button, inset, attic and button bar come from the
+-- template. The wardrobe's brown panel (CollectionsBackgroundTemplate, Mainline/SharedCollectionTemplates.xml) takes
+-- the inset's place without its corner ornaments; Inset stays the content parent and draws nothing.
+local function CreateWindow(name, title, icon, width, height, position)
+    local frame = CreateFrame("Frame", name, UIParent, "ButtonFrameTemplate")
+    frame:SetSize(width, height)
+    frame.Inset.Bg:Hide()
+    frame.Inset.NineSlice:Hide()
+    local background = CreateFrame("Frame", nil, frame, "CollectionsBackgroundTemplate")
+    background:ClearAllPoints()
+    background:SetAllPoints(frame.Inset)
+    for _, corner in ipairs(BACKGROUND_CORNERS) do background[corner]:Hide() end
+    frame.Background = background
+    frame:SetTitle(title)
+    frame:SetPortraitToAsset(icon)
+
+    -- The close button goes through HideUIPanel, which refuses insecure callers in combat. UIPanelCloseButton_OnClick
+    -- asks onCloseCallback first, so the window hides itself instead.
+    frame.onCloseCallback = function()
+        frame:Hide()
+        return false
+    end
+
+    MakeMovable(frame, name, "HIGH", position)
+    return frame
+end
+
+-- A MagicButtonTemplate bar button, 128 wide: the first takes the bottom-right corner, later ones chain leftwards.
+-- MagicButton_OnLoad runs after the anchor so Blizzard applies its corner and neighbour spacing.
+local function AddBarButton(window, label, onClick, width)
+    local button = CreateFrame("Button", nil, window, "MagicButtonTemplate")
+    button:SetWidth(width or 128)
+    window.barButtons = window.barButtons or {}
+    local previous = window.barButtons[#window.barButtons]
+    if previous then
+        button:SetPoint("RIGHT", previous, "LEFT")
+    else
+        button:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT")
+    end
+    MagicButton_OnLoad(button)
+    button:SetText(label)
+    button:SetScript("OnClick", onClick)
+    window.barButtons[#window.barButtons + 1] = button
+    return button
+end
+
+-- A help line in the attic, from title left 58 to the rows' right edge, cut rather than wrapped. Two lines sit one
+-- gap either side of the attic's middle: a gold how-to over a white next step.
+local function CreateAtticLine(frame, fontObject, y, rightOffset)
+    local line = CreateText(frame, fontObject)
+    line:SetPoint("LEFT", frame, "TOPLEFT", 58, y)
+    line:SetPoint("RIGHT", frame, "TOPRIGHT", rightOffset, y)
+    line:SetWordWrap(false)
+    return line
+end
+
+-- Builds the window on first use and flips it after that, so no frame exists until the player asks.
+local function CreateToggle(build)
+    local window
+    return function()
+        window = window or build()
+        window:SetShown(not window:IsShown())
+    end
+end
+
+-- A dialog in Blizzard's dialog chrome: DialogBorderTemplate, DialogHeaderTemplate with the title and
+-- UIPanelCloseButton 2 px in from the corner (Blizzard_Channels/Mainline/CreateChannelPopup.xml:72). Width is a
+-- multiple of 8 from 400 to 480. Add content top to bottom with AddText and AddField, then call Fit.
+local DIALOG_SIDE, DIALOG_TOP, SECTION_GAP = 20, 40, 24
+local function CreateDialog(name, title, width, parent, position)
+    local dialog = CreateFrame("Frame", name, parent or UIParent)
+    dialog:SetSize(width, DIALOG_TOP + DIALOG_SIDE)
+    dialog.contentWidth = width - 2 * DIALOG_SIDE
+    dialog.contentHeight = 0
+    dialog.buttons = {}
+    dialog.Border = CreateFrame("Frame", nil, dialog, "DialogBorderTemplate")
+    dialog.Header = CreateFrame("Frame", nil, dialog, "DialogHeaderTemplate")
+    dialog.Header:Setup(title)
+    -- UIPanelCloseButton_OnClick goes through HideUIPanel, which refuses insecure callers in combat.
+    dialog.CloseButton = CreateFrame("Button", nil, dialog, "UIPanelCloseButton")
+    dialog.CloseButton:SetPoint("TOPRIGHT", -2, -2)
+    dialog.CloseButton:SetScript("OnClick", function() dialog:Hide() end)
+
+    -- Places a widget the caller sized in the content column below everything added so far; indent covers native
+    -- art, 5 for an edit box, 8 for a dropdown. The gap defaults to 8; AddText passes a section break.
+    function dialog:AddField(region, height, gap, indent)
+        if self.hasContent then self.contentHeight = self.contentHeight + (gap or 8) end
+        self.hasContent = true
+        region:SetPoint("TOPLEFT", self, "TOPLEFT", DIALOG_SIDE + (indent or 0), -(DIALOG_TOP + self.contentHeight))
+        self.contentHeight = self.contentHeight + height
+    end
+
+    -- Wrapped text across the column, never less than one line, so text filled in later keeps its line.
+    function dialog:AddText(fontObject, text, gap)
+        local line = CreateText(self, fontObject)
+        line:SetWidth(self.contentWidth)
+        line:SetWordWrap(true)
+        line:SetText(text or "")
+        local _, lineHeight = fontObject:GetFont()
+        local height = math.ceil(math.max(line:GetStringHeight(), lineHeight))
+        line:SetHeight(height)
+        self:AddField(line, height, gap or SECTION_GAP)
+        return line
+    end
+
+    -- A 24 px fit-to-text button in the bottom-right corner; later ones chain leftwards 8 apart.
+    function dialog:AddButton(label, onClick)
+        local button = CreateButton(self, label)
+        local previous = self.buttons[#self.buttons]
+        if previous then
+            button:SetPoint("RIGHT", previous, "LEFT", -8, 0)
+        else
+            button:SetPoint("BOTTOMRIGHT", -DIALOG_SIDE, DIALOG_SIDE)
+        end
+        button:SetScript("OnClick", onClick)
+        self.buttons[#self.buttons + 1] = button
+        return button
+    end
+
+    -- 40 top, the content, a section break and the button row if there are buttons, 20 bottom, on the grid.
+    function dialog:Fit()
+        local height = DIALOG_TOP + self.contentHeight + DIALOG_SIDE
+        if #self.buttons > 0 then height = height + SECTION_GAP + 24 end
+        self:SetHeight(Snap(height))
+    end
+
+    MakeMovable(dialog, name, "DIALOG", position)
+    return dialog
+end
+
 -- Laid out like Blizzard's macro window (Blizzard_MacroUI.xml): a list to pick from, an editor for
 -- the picked entry, Delete in the bar's bottom-left corner and New beside the primary button. Two
--- equal wells as in Chat Scan: the reminders on the left, the editor on the right. The outer width
--- carries Blizzard's 4/-6 inset offsets, so it is 674.
+-- equal columns: the reminders on the left, the editor on the right. The outer width carries
+-- Blizzard's 4/-6 inset offsets, so it is 674.
 local COLUMN_W = 328
-local PANEL_W = PANEL_INSET_LEFT_OFFSET + 2 * COLUMN_W + UI.Space.gap - PANEL_INSET_RIGHT_OFFSET
+local PANEL_W = PANEL_INSET_LEFT_OFFSET + 2 * COLUMN_W + GAP - PANEL_INSET_RIGHT_OFFSET
 
 -- The editor's inner width, and the half a short value box takes so a checkbox fits beside it.
-local BODY_W = COLUMN_W - 2 * UI.Space.padding
-local HALF_W = (BODY_W - UI.Space.gap) / 2
-
--- Every choice shows at once as a radio or a checkbox, so a pick is one click. UIRadioButtonTemplate
--- is the 16px radio of Send Mail's Send Money and COD (Blizzard_MailFrame/MailFrame.xml:3). It sits
--- centred in a 24px row like UI.CreateCheckbox, so radio and checkbox labels start at the same x.
-local RADIO_SIZE = 16
-local RADIO_INSET = (UI.Size.row - RADIO_SIZE) / 2
+local BODY_W = COLUMN_W - 2 * PADDING
+local HALF_W = (BODY_W - GAP) / 2
 
 -- Rows stacked a tight gap apart: the weekdays in three columns and the outputs.
 local function stackHeight(rows)
-    return rows * UI.Size.row + (rows - 1) * UI.Space.tight
+    return rows * ROW + (rows - 1) * TIGHT
 end
 local DAY_COLUMNS = 3
-local DAY_W = 4 * math.floor((BODY_W + UI.Space.gap) / DAY_COLUMNS / 4)
+local DAY_W = 4 * math.floor((BODY_W + GAP) / DAY_COLUMNS / 4)
 local DAYS_H = stackHeight(math.ceil(#ns.WEEK_ORDER / DAY_COLUMNS))
 local OUTPUTS_H = stackHeight(#ns.OUTPUTS)
 
 -- The preview line under When has room for two lines.
-local PREVIEW_H = 2 * UI.Size.heading
+local PREVIEW_H = 2 * HEADING
 
--- The editor's longest layout, Time of Day: padding, three section headings, two section breaks,
--- the message box, the When body (trigger, time, weekdays and preview) and the outputs.
-local HEADING_H = UI.Size.heading + UI.Space.gap
-local WHEN_CLOCK_H = 2 * (UI.Size.row + UI.Space.gap) + DAYS_H + UI.Space.gap + PREVIEW_H
-local EDITOR_H = 2 * UI.Space.padding + 3 * HEADING_H + 2 * UI.Space.section + UI.Size.row + WHEN_CLOCK_H + OUTPUTS_H
+-- The editor's longest layout, Time of Day: padding, three section heads, two section breaks, the
+-- message box, the When body (trigger, time, weekdays and preview) and the outputs.
+local WHEN_CLOCK_H = 2 * (ROW + GAP) + DAYS_H + GAP + PREVIEW_H
+local EDITOR_H = 2 * PADDING + 3 * SECTION_BODY_TOP + 2 * SECTION_GAP + ROW + WHEN_CLOCK_H + OUTPUTS_H
 
--- The template's attic keeps the wells below the portrait, which hangs 55px down from the top edge
+-- The template's attic keeps the columns below the portrait, which hangs 55px down from the top edge
 -- (Mainline/SharedUIPanelTemplates.xml:584). The attic and button bar offsets (60 and 26) are off
--- the grid, so the height snaps up and the extra px fall into the wells' bottom padding.
-local PANEL_H = UI.Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+-- the grid, so the height snaps up and the extra px fall into the columns' bottom padding.
+local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_BUTTON_OFFSET)
 
-local LIST_W = COLUMN_W - UI.Space.padding - UI.ScrollGutter()
+local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
 
 -- A list row: the text over its trigger line, two heading-tall lines a tight gap apart with a tight
 -- inset all round, so the hover and selection bars frame the text. Rows sit a tight gap apart.
-local ROW_INSET = UI.Space.tight
-local ROW_H = 2 * UI.Size.heading + UI.Space.tight + 2 * ROW_INSET
-local ROW_PITCH = ROW_H + UI.Space.tight
+local ROW_INSET = TIGHT
+local ROW_H = 2 * HEADING + TIGHT + 2 * ROW_INSET
+local ROW_PITCH = ROW_H + TIGHT
 
 -- The empty list also teaches the chat command, in two lines.
 local EMPTY_TEXT = "Your reminders show here. To add one from chat, type /rm in 30m Stretch."
-local EMPTY_H = 2 * UI.Size.heading
+local EMPTY_H = 2 * HEADING
 
 -- The attic line names the mode and the next step.
 local HELP_NEW = "Fill in a new reminder, or click one on the left to change it."
@@ -113,48 +402,30 @@ end
 
 local panel
 
--- InputBoxInstructionsTemplate is the InputBoxTemplate behind UI.CreateEditBox plus Blizzard's grey
--- hint, so an empty field says what it takes. The hint moves to the muted role and sits where the
--- typed text starts. Its template grey is read before the font object changes and put back after,
--- as UI.CreateSearchBox does.
-local function createHintBox(parent, hint)
-    local box = CreateFrame("EditBox", nil, parent, "InputBoxInstructionsTemplate")
-    box:SetHeight(UI.Native.inputHeight)
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(255)
-    box:SetFontObject(UI.Font.body)
-    local r, g, b = box.Instructions:GetTextColor()
-    box.Instructions:SetFontObject(UI.Font.muted)
-    box.Instructions:SetTextColor(r, g, b)
-    box.Instructions:ClearAllPoints()
-    box.Instructions:SetAllPoints()
-    box.Instructions:SetText(hint)
-    return box
-end
-
 local function attachTip(frame, title, text)
-    UI.AttachTooltip(frame, function(tooltip)
+    AttachTooltip(frame, function(tooltip)
         GameTooltip_SetTitle(tooltip, title)
         GameTooltip_AddNormalLine(tooltip, text, true)
     end)
 end
 
--- A radio with a 12px body label that is clickable too, as UI.CreateCheckbox's is. The caller
--- anchors it by its LEFT edge, RADIO_INSET into a row.
+-- Radios and checkboxes with their tooltips. The caller anchors a radio by its LEFT edge, RADIO_INSET
+-- into a row, so radio and checkbox labels start at the same x.
 local function createRadio(parent, label, tip)
-    local radio = CreateFrame("CheckButton", nil, parent, "UIRadioButtonTemplate")
-    radio.label = UI.CreateText(radio, "body")
-    radio.label:SetPoint("LEFT", radio, "RIGHT", UI.Space.tight + RADIO_INSET, 0)
-    radio.label:SetText(label)
-    radio:SetHitRectInsets(0, -(UI.Space.tight + RADIO_INSET + radio.label:GetStringWidth()), 0, 0)
+    local radio = CreateRadio(parent, label)
     attachTip(radio, label, tip)
     return radio
 end
 
 local function createCheck(parent, label, tip)
-    local check = UI.CreateCheckbox(parent, label)
+    local check = CreateCheckbox(parent, label)
     if tip then attachTip(check, label, tip) end
     return check
+end
+
+-- A section's height follows its body.
+local function setBodyHeight(section, height)
+    section:SetHeight(SECTION_BODY_TOP + height)
 end
 
 -- A slot spans a section body at a top offset and holds one line of controls.
@@ -170,13 +441,13 @@ local function placeSlot(slot, body, top)
     slot:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
 end
 
--- The left well's scroll area, placed like Chat Scan's: one padding in from the top, left and bottom,
--- the scroll bar's gutter free on the right. The bar hides while every row fits.
-local function createWellScroll(well)
-    local scroll = UI.CreateScroll(well)
+-- The left column's scroll area: one padding in from the top, left and bottom, the scroll bar's
+-- gutter free on the right. The bar hides while every row fits.
+local function createListScroll(column)
+    local scroll = CreateScroll(column)
     scroll.ScrollBar:SetHideIfUnscrollable(true)
-    scroll:SetPoint("TOPLEFT", UI.Space.padding, -UI.Space.padding)
-    scroll:SetPoint("BOTTOMRIGHT", -UI.ScrollGutter(), UI.Space.padding)
+    scroll:SetPoint("TOPLEFT", PADDING, -PADDING)
+    scroll:SetPoint("BOTTOMRIGHT", -SCROLL_GUTTER, PADDING)
     scroll.content:SetWidth(LIST_W)
     return scroll
 end
@@ -189,35 +460,30 @@ local function createColumns(frame)
     left:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", PANEL_INSET_LEFT_OFFSET + COLUMN_W, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
 
     local right = CreateFrame("Frame", nil, frame)
-    right:SetPoint("TOPLEFT", left, "TOPRIGHT", UI.Space.gap, 0)
+    right:SetPoint("TOPLEFT", left, "TOPRIGHT", GAP, 0)
     right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", PANEL_INSET_RIGHT_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
 
     local background = frame.Background
     background:ClearAllPoints()
     background:SetPoint("TOPLEFT", left)
     background:SetPoint("BOTTOMRIGHT", right)
-    local divider = UI.CreateVerticalDivider(background)
-    divider:SetPoint("TOP", left, "TOPRIGHT", UI.Space.gap / 2, -UI.Space.padding)
-    divider:SetPoint("BOTTOM", left, "BOTTOMRIGHT", UI.Space.gap / 2, UI.Space.padding)
+    local divider = CreateVerticalDivider(background)
+    divider:SetPoint("TOP", left, "TOPRIGHT", GAP / 2, -PADDING)
+    divider:SetPoint("BOTTOM", left, "BOTTOMRIGHT", GAP / 2, PADDING)
     return left, right
 end
 
--- One line in the attic, the band between the title bar and the wells, level with the title and
--- centred on the band's height, as in Target Finder.
+-- One line in the attic, the band between the title bar and the columns, centred on the band's height.
 local function createAtticHelp(frame)
     local atticMiddle = (PANEL_INSET_TOP_OFFSET + PANEL_INSET_ATTIC_OFFSET) / 2
-    local help = UI.CreateText(frame, "body")
-    help:SetPoint("LEFT", frame, "TOPLEFT", UI.Native.titleLeft, atticMiddle)
-    help:SetPoint("RIGHT", frame, "TOPRIGHT", PANEL_INSET_RIGHT_OFFSET - UI.Space.padding, atticMiddle)
-    help:SetWordWrap(false)
-    return help
+    return CreateAtticLine(frame, GameFontHighlight, atticMiddle, PANEL_INSET_RIGHT_OFFSET - PADDING)
 end
 
 -- Delete takes the bar's bottom-left corner, as MacroDeleteButton does. MagicButton_OnLoad runs
--- after the zero-offset anchor so Blizzard applies its corner inset, as UI.AddBarButton does.
+-- after the zero-offset anchor so Blizzard applies its corner inset, as AddBarButton does.
 local function createDeleteButton(frame)
     local button = CreateFrame("Button", nil, frame, "MagicButtonTemplate")
-    button:SetWidth(UI.Size.button)
+    button:SetWidth(128)
     button:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT")
     MagicButton_OnLoad(button)
     button:SetText(DELETE)
@@ -226,13 +492,13 @@ end
 
 -- The status sits in an inset that fills the button bar between Delete and New Reminder.
 local function createStatus(frame, leftButton, rightButton)
-    local box = UI.CreateInset(frame)
-    box:SetPoint("BOTTOMLEFT", leftButton, "BOTTOMRIGHT", UI.Space.gap, 0)
-    box:SetPoint("TOPRIGHT", rightButton, "TOPLEFT", -UI.Space.gap, 0)
+    local box = CreateInset(frame)
+    box:SetPoint("BOTTOMLEFT", leftButton, "BOTTOMRIGHT", GAP, 0)
+    box:SetPoint("TOPRIGHT", rightButton, "TOPLEFT", -GAP, 0)
 
-    local status = UI.CreateText(box, "body")
-    status:SetPoint("LEFT", UI.Space.gap, 0)
-    status:SetPoint("RIGHT", -UI.Space.gap, 0)
+    local status = CreateText(box, GameFontHighlight)
+    status:SetPoint("LEFT", GAP, 0)
+    status:SetPoint("RIGHT", -GAP, 0)
     status:SetWordWrap(false)
     return status
 end
@@ -240,9 +506,9 @@ end
 -- Delete asks first, as the macro window's Delete does (CONFIRM_DELETE_SELECTED_MACRO), and names the
 -- reminder it would remove. Accept sits left of Cancel, as on Blizzard's popups.
 local function createDeleteDialog()
-    local dialog = UI.CreateDialog({ name = "RemindMeDeleteDialog", title = ns.TITLE, width = DIALOG_W })
-    dialog:AddText("body", "Delete this reminder?")
-    dialog.subject = dialog:AddText("muted", "", UI.Space.tight)
+    local dialog = CreateDialog("RemindMeDeleteDialog", ns.title, DIALOG_W)
+    dialog:AddText(GameFontHighlight, "Delete this reminder?")
+    dialog.subject = dialog:AddText(GameFontDisable, "", TIGHT)
     dialog.subject:SetWordWrap(false)
     dialog.cancelButton = dialog:AddButton(CANCEL, function() dialog:Hide() end)
     dialog.deleteButton = dialog:AddButton(DELETE, nil)
@@ -264,7 +530,7 @@ local function createRow(parent, onClick)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(ROW_H)
     row:SetScript("OnClick", function() onClick(row.reminder) end)
-    UI.AttachTooltip(row, fillRowTooltip)
+    AttachTooltip(row, fillRowTooltip)
 
     row.selection = row:CreateTexture(nil, "BACKGROUND")
     row.selection:SetAtlas("Options_List_Active")
@@ -274,16 +540,16 @@ local function createRow(parent, onClick)
     row.hover:SetAtlas("Options_List_Hover")
     row.hover:SetAllPoints()
 
-    row.text = UI.CreateText(row, "body")
+    row.text = CreateText(row, GameFontHighlight)
     row.text:SetPoint("TOPLEFT", ROW_INSET, -ROW_INSET)
     row.text:SetPoint("TOPRIGHT", -ROW_INSET, -ROW_INSET)
-    row.text:SetHeight(UI.Size.heading)
+    row.text:SetHeight(HEADING)
     row.text:SetWordWrap(false)
 
-    row.detail = UI.CreateText(row, "muted")
-    row.detail:SetPoint("TOPLEFT", row.text, "BOTTOMLEFT", 0, -UI.Space.tight)
-    row.detail:SetPoint("TOPRIGHT", row.text, "BOTTOMRIGHT", 0, -UI.Space.tight)
-    row.detail:SetHeight(UI.Size.heading)
+    row.detail = CreateText(row, GameFontDisable)
+    row.detail:SetPoint("TOPLEFT", row.text, "BOTTOMLEFT", 0, -TIGHT)
+    row.detail:SetPoint("TOPRIGHT", row.text, "BOTTOMRIGHT", 0, -TIGHT)
+    row.detail:SetHeight(HEADING)
     row.detail:SetWordWrap(false)
     return row
 end
@@ -319,10 +585,7 @@ local function describeNext(spec)
 end
 
 local function buildPanel()
-    local frame = UI.CreateWindow({
-        name = "RemindMeFrame", title = ns.TITLE, icon = ns.ICON,
-        width = PANEL_W, height = PANEL_H, position = RemindMeDB.window,
-    })
+    local frame = CreateWindow("RemindMeFrame", ns.title, ns.ICON, PANEL_W, PANEL_H, RemindMeDB.window)
     local left, right = createColumns(frame)
     local help = createAtticHelp(frame)
     frame.help = help
@@ -336,12 +599,12 @@ local function buildPanel()
     local notice, noticeColor
 
     -- Reminders list.
-    local scroll = createWellScroll(left)
-    local listSection = UI.CreateSection(scroll.content, "Reminders")
+    local scroll = createListScroll(left)
+    local listSection = CreateSection(scroll.content, "Reminders")
     listSection:SetPoint("TOPLEFT")
     listSection:SetPoint("TOPRIGHT")
 
-    local empty = UI.CreateText(listSection.body, "muted")
+    local empty = CreateText(listSection.body, GameFontDisable)
     empty:SetPoint("TOPLEFT")
     empty:SetPoint("TOPRIGHT")
     empty:SetHeight(EMPTY_H)
@@ -352,33 +615,35 @@ local function buildPanel()
     local rows = { active = {}, pool = {} }
 
     -- Message section.
-    local messageSection = UI.CreateSection(right, "Message")
-    messageSection:SetPoint("TOPLEFT", UI.Space.padding, -UI.Space.padding)
-    messageSection:SetPoint("TOPRIGHT", -UI.Space.padding, -UI.Space.padding)
-    local textSlot = createSlot(messageSection.body, UI.Size.row)
+    local messageSection = CreateSection(right, "Message")
+    messageSection:SetPoint("TOPLEFT", PADDING, -PADDING)
+    messageSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+    local textSlot = createSlot(messageSection.body, ROW)
     placeSlot(textSlot, messageSection.body, 0)
-    messageSection:SetBodyHeight(UI.Size.row)
+    setBodyHeight(messageSection, ROW)
 
     -- The box sits in by the template's left cap, so its visible border lines up with the column.
-    local textBox = createHintBox(textSlot, "What should it remind you of?")
-    textBox:SetPoint("LEFT", UI.Native.inputArt, 0)
+    local textBox = CreateHintBox(textSlot, "What should it remind you of?")
+    textBox:SetMaxLetters(255)
+    textBox:SetPoint("LEFT", INPUT_CAP, 0)
     textBox:SetPoint("RIGHT")
 
-    -- When section: the trigger radios, the value with what goes beside it, the weekdays of a time
-    -- of day or the Every Time tick of a zone, and the preview line.
-    local whenSection = UI.CreateSection(right, "When")
-    UI.StackBelow(whenSection, messageSection)
+    -- When section, one section break below Message: the trigger radios, the value with what goes
+    -- beside it, the weekdays of a time of day or the Every Time tick of a zone, and the preview line.
+    local whenSection = CreateSection(right, "When")
+    whenSection:SetPoint("TOPLEFT", messageSection, "BOTTOMLEFT", 0, -SECTION_GAP)
+    whenSection:SetPoint("TOPRIGHT", messageSection, "BOTTOMRIGHT", 0, -SECTION_GAP)
     local whenBody = whenSection.body
-    local kindSlot = createSlot(whenBody, UI.Size.row)
-    local valueSlot = createSlot(whenBody, UI.Size.row)
+    local kindSlot = createSlot(whenBody, ROW)
+    local valueSlot = createSlot(whenBody, ROW)
     local daysSlot = createSlot(whenBody, DAYS_H)
-    local zoneSlot = createSlot(whenBody, UI.Size.row)
+    local zoneSlot = createSlot(whenBody, ROW)
 
     local kindRadios, previous = {}, nil
     for _, kind in ipairs(ns.KINDS) do
         local radio = createRadio(kindSlot, ns.KIND_LABELS[kind], KIND_TIPS[kind])
         if previous then
-            radio:SetPoint("LEFT", previous.label, "RIGHT", UI.Space.padding + RADIO_INSET, 0)
+            radio:SetPoint("LEFT", previous.label, "RIGHT", PADDING + RADIO_INSET, 0)
         else
             radio:SetPoint("LEFT", kindSlot, "LEFT", RADIO_INSET, 0)
         end
@@ -386,50 +651,51 @@ local function buildPanel()
         previous = radio
     end
 
-    local valueBox = createHintBox(valueSlot, VALUE_HINTS[form.kind])
-    local hereButton = UI.CreateButton(valueSlot, "Current Zone")
+    local valueBox = CreateHintBox(valueSlot, VALUE_HINTS[form.kind])
+    valueBox:SetMaxLetters(255)
+    local hereButton = CreateButton(valueSlot, "Current Zone")
     hereButton:SetPoint("RIGHT")
     local timerRepeat = createCheck(valueSlot, "Repeat", TIMER_REPEAT_TIP)
-    timerRepeat:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + UI.Space.gap, 0)
+    timerRepeat:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
     local localCheck = createCheck(valueSlot, TIMEMANAGER_LOCALTIME, LOCAL_TIME_TIP)
-    localCheck:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + UI.Space.gap, 0)
+    localCheck:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
 
     -- Weekdays from Monday, three to a row.
     local dayChecks = {}
     for i, wday in ipairs(ns.WEEK_ORDER) do
         local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday])
         local column, line = (i - 1) % DAY_COLUMNS, math.floor((i - 1) / DAY_COLUMNS)
-        check:SetPoint("TOPLEFT", daysSlot, "TOPLEFT", column * DAY_W, -line * (UI.Size.row + UI.Space.tight))
+        check:SetPoint("TOPLEFT", daysSlot, "TOPLEFT", column * DAY_W, -line * (ROW + TIGHT))
         dayChecks[wday] = check
     end
 
     local zoneRepeat = createCheck(zoneSlot, "Every Time", ZONE_REPEAT_TIP)
     zoneRepeat:SetPoint("LEFT")
 
-    local preview = UI.CreateText(whenBody, "body")
+    local preview = CreateText(whenBody, GameFontHighlight)
     preview:SetHeight(PREVIEW_H)
     preview:SetJustifyV("TOP")
     preview:SetWordWrap(true)
 
-    -- Send As section, held to the well's bottom so it never moves when the trigger changes. The
+    -- Send As section, held to the column's bottom so it never moves when the trigger changes. The
     -- outputs stack, as long names such as the German raid warning need the width.
-    local outputSection = UI.CreateSection(right, "Send As")
-    outputSection:SetPoint("BOTTOMLEFT", UI.Space.padding, UI.Space.padding)
-    outputSection:SetPoint("BOTTOMRIGHT", -UI.Space.padding, UI.Space.padding)
-    outputSection:SetBodyHeight(OUTPUTS_H)
+    local outputSection = CreateSection(right, "Send As")
+    outputSection:SetPoint("BOTTOMLEFT", PADDING, PADDING)
+    outputSection:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    setBodyHeight(outputSection, OUTPUTS_H)
     local outputRadios = {}
     for i, output in ipairs(ns.OUTPUTS) do
         local radio = createRadio(outputSection.body, ns.OUTPUT_LABELS[output], OUTPUT_TIPS[output])
-        local middle = (i - 1) * (UI.Size.row + UI.Space.tight) + UI.Size.row / 2
+        local middle = (i - 1) * (ROW + TIGHT) + ROW / 2
         radio:SetPoint("LEFT", outputSection.body, "TOPLEFT", RADIO_INSET, -middle)
         outputRadios[output] = radio
     end
-    local testButton = UI.CreateButton(outputSection.body, "Test")
+    local testButton = CreateButton(outputSection.body, "Test")
     testButton:SetPoint("TOPRIGHT")
 
     -- The primary button takes the bar's bottom-right corner and reads Save while editing.
-    local saveButton = UI.AddBarButton(frame, ADD_LABEL, function() frame:SaveForm() end)
-    local newButton = UI.AddBarButton(frame, NEW_LABEL, function() frame:NewReminder() end)
+    local saveButton = AddBarButton(frame, ADD_LABEL, function() frame:SaveForm() end)
+    local newButton = AddBarButton(frame, NEW_LABEL, function() frame:NewReminder() end)
     local deleteButton = createDeleteButton(frame)
     local status = createStatus(frame, deleteButton, newButton)
     local deleteDialog = createDeleteDialog()
@@ -444,35 +710,35 @@ local function buildPanel()
         local isTimer, isClock, isZone = form.kind == "timer", form.kind == "clock", form.kind == "zone"
         local top = 0
         placeSlot(kindSlot, whenBody, top)
-        top = top + UI.Size.row + UI.Space.gap
+        top = top + ROW + GAP
 
         placeSlot(valueSlot, whenBody, top)
         valueBox:ClearAllPoints()
-        valueBox:SetPoint("LEFT", UI.Native.inputArt, 0)
+        valueBox:SetPoint("LEFT", INPUT_CAP, 0)
         if isZone then
-            valueBox:SetPoint("RIGHT", hereButton, "LEFT", -UI.Space.gap, 0)
+            valueBox:SetPoint("RIGHT", hereButton, "LEFT", -GAP, 0)
         else
             valueBox:SetPoint("RIGHT", valueSlot, "LEFT", HALF_W, 0)
         end
         hereButton:SetShown(isZone)
         timerRepeat:SetShown(isTimer)
         localCheck:SetShown(isClock)
-        top = top + UI.Size.row + UI.Space.gap
+        top = top + ROW + GAP
 
         daysSlot:SetShown(isClock)
         zoneSlot:SetShown(isZone)
         if isClock then
             placeSlot(daysSlot, whenBody, top)
-            top = top + DAYS_H + UI.Space.gap
+            top = top + DAYS_H + GAP
         elseif isZone then
             placeSlot(zoneSlot, whenBody, top)
-            top = top + UI.Size.row + UI.Space.gap
+            top = top + ROW + GAP
         end
 
         preview:ClearAllPoints()
         preview:SetPoint("TOPLEFT", whenBody, "TOPLEFT", 0, -top)
         preview:SetPoint("TOPRIGHT", whenBody, "TOPRIGHT", 0, -top)
-        whenSection:SetBodyHeight(top + PREVIEW_H)
+        setBodyHeight(whenSection, top + PREVIEW_H)
     end
 
     -- The trigger as a spec, or nil and the problem. An empty value is no problem yet, only unfinished.
@@ -512,9 +778,9 @@ local function buildPanel()
         if spec then
             preview:SetText(describeNext(spec))
         elseif problem then
-            preview:SetText(UI.Color.bad:WrapTextInColorCode(problem))
+            preview:SetText(RED_FONT_COLOR:WrapTextInColorCode(problem))
         else
-            preview:SetText(UI.Color.muted:WrapTextInColorCode(PREVIEW_HINTS[form.kind]))
+            preview:SetText(GRAY_FONT_COLOR:WrapTextInColorCode(PREVIEW_HINTS[form.kind]))
         end
         saveButton:SetEnabled(readForm() ~= nil)
     end
@@ -539,13 +805,13 @@ local function buildPanel()
         end
         local sorted = Reminders.Sorted()
         if #sorted == 0 then
-            status:SetText(UI.Color.muted:WrapTextInColorCode("No reminders yet"))
+            status:SetText(GRAY_FONT_COLOR:WrapTextInColorCode("No reminders yet"))
             return
         end
         local text = ns.countLabel(#sorted, "reminder", "reminders")
         local nextUp = sorted[1]
         if nextUp.due then
-            text = text .. ", next " .. UI.Color.good:WrapTextInColorCode("in " .. Time.FormatLeft(nextUp.due - GetServerTime()))
+            text = text .. ", next " .. GREEN_FONT_COLOR:WrapTextInColorCode("in " .. Time.FormatLeft(nextUp.due - GetServerTime()))
         end
         status:SetText(text)
     end
@@ -608,7 +874,7 @@ local function buildPanel()
             row:Show()
             rows.active[i] = row
         end
-        listSection:SetBodyHeight(#sorted > 0 and #sorted * ROW_PITCH - UI.Space.tight or EMPTY_H)
+        setBodyHeight(listSection, #sorted > 0 and #sorted * ROW_PITCH - TIGHT or EMPTY_H)
 
         -- A reminder that fired once or was removed by command leaves the editor. Its fields stay,
         -- so Add Reminder can bring it back.
@@ -691,14 +957,14 @@ local function buildPanel()
         if selected then
             if not Reminders.Update(selected, spec) then return end
             clearFocus()
-            setNotice("Saved.", UI.Color.good)
+            setNotice("Saved.", GREEN_FONT_COLOR)
             return
         end
         if not Reminders.Add(spec) then return end
         textBox:SetText("")
         valueBox:SetText("")
         clearFocus()
-        setNotice("Added.", UI.Color.good)
+        setNotice("Added.", GREEN_FONT_COLOR)
     end
 
     -- A trigger change empties the value, which means something else under each trigger.
@@ -799,7 +1065,7 @@ local function buildPanel()
 end
 
 -- One toggle for /rm, the minimap button and the addon menu. The window is built on first use.
-ns.TogglePanel = UI.CreateToggle(buildPanel)
+ns.TogglePanel = CreateToggle(buildPanel)
 
 -- Opens the window with a reminder in the editor, for /rm edit.
 function ns.EditInPanel(r)
