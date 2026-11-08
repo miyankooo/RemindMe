@@ -36,6 +36,17 @@ local function AttachTooltip(frame, fill, anchor)
     frame:SetScript("OnLeave", GameTooltip_Hide)
 end
 
+-- AttachTooltip for a frame whose template already sets OnEnter and OnLeave, such as Blizzard's buttons and
+-- hint boxes: the tooltip is hooked in after the template's own handlers.
+local function HookTooltip(frame, fill, anchor)
+    frame:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+        fill(GameTooltip, self)
+        GameTooltip:Show()
+    end)
+    frame:HookScript("OnLeave", GameTooltip_Hide)
+end
+
 -- Rounds a length derived from text up to the 4 px grid.
 local function Snap(length)
     return math.ceil(length / 4) * 4
@@ -167,6 +178,53 @@ local function CreateListRow(parent, index)
     row.detail:SetPoint("TOPRIGHT", row.name, "BOTTOMRIGHT", 0, -4)
     row.detail:SetWordWrap(false)
     return row
+end
+
+-- An empty list says what fills it and how, in one muted line centred in the list.
+local function CreateEmptyState(parent, text)
+    local empty = CreateText(parent, GameFontDisable)
+    empty:SetPoint("LEFT", 16, 0)
+    empty:SetPoint("RIGHT", -16, 0)
+    empty:SetJustifyH("CENTER")
+    empty:SetText(text)
+    return empty
+end
+
+-- Blizzard's yellow help tip, the Auction House's undercut tip (Blizzard_AuctionHouseSellFrame.lua:507), as an
+-- own HelpTipTemplate frame on the target. HelpTip:Show takes a frame from Blizzard's shared pool, and addon
+-- code writing to it taints the tips Blizzard shows later. The tip shows each time its target shows until the
+-- player closes it or uses the feature, then never again on the account. It hides with its target unmarked.
+-- Reset runs before every Init: only Blizzard's pool resets a tip, and Init leaves acknowledged set
+-- (Blizzard_SharedXML/HelpTip.lua:419-431, 495, 687), so a tip closed once and brought back by intro would
+-- count as seen when it merely hides with its target. On hide, Close hands the tip to HelpTip:Release, which
+-- ignores a frame its pool does not own (HelpTip.lua:343-346).
+local function AttachTip(target, text, targetPoint, relativeRegion)
+    local tip
+    local info = {
+        text = text,
+        buttonStyle = HelpTip.ButtonStyle.Close,
+        targetPoint = targetPoint,
+        onAcknowledgeCallback = function() RemindMeDB.tipSeen = true end,
+    }
+    local function ShowTip()
+        if RemindMeDB.tipSeen or (tip and tip:IsShown()) then return end
+        if not tip then
+            tip = CreateFrame("Frame", nil, target, "HelpTipTemplate")
+            tip.width = HelpTip.width
+            tip:SetWidth(tip.width)
+        end
+        tip:Reset()
+        tip:Init(target, info, relativeRegion or target)
+        tip:Show()
+    end
+    target:HookScript("OnShow", ShowTip)
+    if target:IsVisible() then ShowTip() end
+
+    -- The player used the feature: the tip goes for good, shown or not.
+    local function Retire()
+        if tip and tip.info then tip:Acknowledge() else RemindMeDB.tipSeen = true end
+    end
+    return ShowTip, Retire
 end
 
 -- The collections panel's ornaments, which a tool window leaves out.
@@ -369,9 +427,11 @@ local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_B
 
 local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
 
--- The empty list also teaches the chat command, in two lines.
-local EMPTY_TEXT = "Your reminders show here. To add one from chat, type /rm in 30m Stretch."
-local EMPTY_H = 2 * HEADING
+-- The empty list says how to fill it, centred in the left column.
+local EMPTY_TEXT = "No reminders yet. Add one on the right."
+
+-- The help tip stands right of the primary button, outside the window, until the first reminder is added.
+local TIP_TEXT = "Type a message and when it fires, then click Add Reminder to set it."
 
 -- The attic line names the mode and the next step.
 local HELP_NEW = "Fill in a new reminder, or click one on the left to change it."
@@ -404,6 +464,14 @@ local OUTPUT_TIPS = {
 local TIMER_REPEAT_TIP = "Starts the countdown again each time it fires."
 local ZONE_REPEAT_TIP = "Fires on every entry, not only the next one."
 local LOCAL_TIME_TIP = "Use your computer's clock instead of the realm clock."
+local DAY_TIP = "Fires on this day every week. With no day ticked, it fires once."
+local MESSAGE_TIP = "What the reminder says when it fires."
+local VALUE_TIPS = {
+    timer = "How long until it fires, such as 90s, 30m or 1h 30m.",
+    clock = "The time it fires, such as 20:30 or 8:30 PM.",
+    zone = "The zone or an area in it, such as Stormwind City or Trade District.",
+}
+local INCOMPLETE_TIP = "Type a message and when it fires first."
 
 local DIALOG_W = 400
 
@@ -430,10 +498,31 @@ end
 
 local panel
 
-local function attachTip(frame, title, text)
-    AttachTooltip(frame, function(tooltip)
+-- A title and one help line. Buttons and hint boxes keep their template's own handlers.
+local function fillTip(title, text)
+    return function(tooltip)
         GameTooltip_SetTitle(tooltip, title)
         GameTooltip_AddNormalLine(tooltip, text, true)
+    end
+end
+
+local function attachTip(frame, title, text)
+    AttachTooltip(frame, fillTip(title, text))
+end
+
+local function hookTip(frame, title, text)
+    HookTooltip(frame, fillTip(title, text))
+end
+
+-- A bar button explains why it is off, as Blizzard's dungeon finder does, so it takes the mouse while
+-- disabled too.
+local function hookBarTip(button, fill)
+    button:SetMotionScriptsWhileDisabled(true)
+    HookTooltip(button, function(tooltip, self)
+        local title, text, whyOff = fill()
+        GameTooltip_SetTitle(tooltip, title)
+        GameTooltip_AddNormalLine(tooltip, text, true)
+        if not self:IsEnabled() then GameTooltip_AddErrorLine(tooltip, whyOff, true) end
     end)
 end
 
@@ -447,7 +536,7 @@ end
 
 local function createCheck(parent, label, tip)
     local check = CreateCheckbox(parent, label)
-    if tip then attachTip(check, label, tip) end
+    attachTip(check, label, tip)
     return check
 end
 
@@ -540,6 +629,8 @@ local function createDeleteDialog()
     dialog.subject:SetWordWrap(false)
     dialog.cancelButton = dialog:AddButton(CANCEL, function() dialog:Hide() end)
     dialog.deleteButton = dialog:AddButton(DELETE, nil)
+    hookTip(dialog.cancelButton, CANCEL, "Keeps the reminder.")
+    hookTip(dialog.deleteButton, DELETE, "Removes the reminder for good.")
     dialog:Fit()
     return dialog
 end
@@ -605,13 +696,7 @@ local function buildPanel()
     listSection:SetPoint("TOPLEFT")
     listSection:SetPoint("TOPRIGHT")
 
-    local empty = CreateText(listSection.body, GameFontDisable)
-    empty:SetPoint("TOPLEFT")
-    empty:SetPoint("TOPRIGHT")
-    empty:SetHeight(EMPTY_H)
-    empty:SetJustifyV("TOP")
-    empty:SetWordWrap(true)
-    empty:SetText(EMPTY_TEXT)
+    local empty = CreateEmptyState(left, EMPTY_TEXT)
 
     -- Rows by list place, made on first need and hidden past the end of the list.
     local rows, shownRows = {}, 0
@@ -629,6 +714,7 @@ local function buildPanel()
     textBox:SetMaxLetters(255)
     textBox:SetPoint("LEFT", INPUT_CAP, 0)
     textBox:SetPoint("RIGHT")
+    hookTip(textBox, "Message", MESSAGE_TIP)
 
     -- When section, one section break below Message: the trigger radios, the value with what goes
     -- beside it, the weekdays of a time of day or the Every Time tick of a zone, and the preview line.
@@ -655,8 +741,13 @@ local function buildPanel()
 
     local valueBox = CreateHintBox(valueSlot, VALUE_HINTS[form.kind])
     valueBox:SetMaxLetters(255)
+    HookTooltip(valueBox, function(tooltip)
+        GameTooltip_SetTitle(tooltip, ns.KIND_LABELS[form.kind])
+        GameTooltip_AddNormalLine(tooltip, VALUE_TIPS[form.kind], true)
+    end)
     local hereButton = CreateButton(valueSlot, "Current Zone")
     hereButton:SetPoint("RIGHT")
+    hookTip(hereButton, "Current Zone", "Fills in the zone you are in.")
     local timerRepeat = createCheck(valueSlot, "Repeat", TIMER_REPEAT_TIP)
     timerRepeat:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
     local localCheck = createCheck(valueSlot, TIMEMANAGER_LOCALTIME, LOCAL_TIME_TIP)
@@ -665,7 +756,7 @@ local function buildPanel()
     -- Weekdays from Monday, three to a row.
     local dayChecks = {}
     for i, wday in ipairs(ns.WEEK_ORDER) do
-        local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday])
+        local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday], DAY_TIP)
         local column, line = (i - 1) % DAY_COLUMNS, math.floor((i - 1) / DAY_COLUMNS)
         check:SetPoint("TOPLEFT", daysSlot, "TOPLEFT", column * DAY_W, -line * (ROW + TIGHT))
         dayChecks[wday] = check
@@ -694,6 +785,7 @@ local function buildPanel()
     end
     local testButton = CreateButton(outputSection.body, "Test")
     testButton:SetPoint("TOPRIGHT")
+    hookTip(testButton, "Test", "Shows the message once now, the way it arrives.")
 
     -- The primary button takes the bar's bottom-right corner and reads Save while editing.
     local saveButton = AddBarButton(frame, ADD_LABEL, function() frame:SaveForm() end)
@@ -701,6 +793,20 @@ local function buildPanel()
     local deleteButton = createDeleteButton(frame)
     local status = createStatus(frame, deleteButton, newButton)
     local deleteDialog = createDeleteDialog()
+
+    hookBarTip(saveButton, function()
+        if selected then return SAVE, "Keeps your changes to this reminder.", INCOMPLETE_TIP end
+        return ADD_LABEL, "Adds the reminder to the list on the left.", INCOMPLETE_TIP
+    end)
+    hookBarTip(newButton, function()
+        return NEW_LABEL, "Empties the editor for a new reminder. Changes to the one shown are kept.",
+            "The editor already shows a new reminder."
+    end)
+    hookBarTip(deleteButton, function()
+        return DELETE, "Removes the reminder shown in the editor, after asking.", "Click a reminder on the left first."
+    end)
+    local showTip, retireTip = AttachTip(saveButton, TIP_TEXT, HelpTip.Point.RightEdgeCenter)
+    frame.showTip = showTip
 
     frame.kindRadios, frame.outputRadios, frame.dayChecks = kindRadios, outputRadios, dayChecks
     frame.repeatChecks = { timer = timerRepeat, zone = zoneRepeat }
@@ -871,7 +977,7 @@ local function buildPanel()
             rows[i].reminder = nil
         end
         shownRows = #sorted
-        setBodyHeight(listSection, #sorted > 0 and #sorted * LIST_PITCH - (LIST_PITCH - LIST_ROW) or EMPTY_H)
+        setBodyHeight(listSection, #sorted > 0 and #sorted * LIST_PITCH - (LIST_PITCH - LIST_ROW) or 0)
 
         -- A reminder that fired once or was removed by command leaves the editor. Its fields stay,
         -- so Add Reminder can bring it back.
@@ -958,6 +1064,7 @@ local function buildPanel()
             return
         end
         if not Reminders.Add(spec) then return end
+        retireTip()
         textBox:SetText("")
         valueBox:SetText("")
         clearFocus()
@@ -1064,10 +1171,20 @@ end
 -- One toggle for /rm, the minimap button and the addon menu. The window is built on first use.
 ns.TogglePanel = CreateToggle(buildPanel)
 
+-- Opens the window and keeps it open, for the welcome link and /rm edit.
+function ns.OpenPanel()
+    if not (panel and panel:IsShown()) then ns.TogglePanel() end
+end
+
 -- Opens the window with a reminder in the editor, for /rm edit.
 function ns.EditInPanel(r)
-    if not (panel and panel:IsShown()) then ns.TogglePanel() end
+    ns.OpenPanel()
     panel:Select(r)
+end
+
+-- /rm intro brings the help tip back at once while the window is open, else at its next open.
+function ns.ShowTip()
+    if panel and panel:IsVisible() then panel.showTip() end
 end
 
 -- Called after any change to the reminders, so an open window mirrors them.

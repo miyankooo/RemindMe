@@ -161,7 +161,8 @@ end
 -- Every command in one line, in the order a new player needs them, then the options.
 local HELP = "Type /rm to open the window, /rm in 30m <text>, /rm at 20:30 <text> or /rm zone Stormwind City: <text>"
     .. " to add a reminder, /rm here <text> for the zone you are in, /rm list, /rm edit 2, /rm test 2, /rm remove 2"
-    .. " or /rm clear to manage them, /rm minimap to show or hide the minimap button, or /rm help for this list."
+    .. " or /rm clear to manage them, /rm intro to see the welcome line and the tip again, /rm minimap to show or"
+    .. " hide the minimap button, or /rm help for this list."
     .. " Options go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or"
     .. " weekdays such as monday wednesday."
 
@@ -191,6 +192,8 @@ local function handleSlash(msg)
         testAt(words[2])
     elseif command == "clear" then
         clear()
+    elseif command == "intro" then
+        ns.ReplayIntro()
     elseif command == "minimap" then
         ns.ToggleMinimap()
     elseif command == "help" or command == "?" then

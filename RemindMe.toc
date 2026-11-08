@@ -20,5 +20,6 @@ Core\Commands.lua
 
 UI\Panel.lua
 UI\MinimapButton.lua
+UI\Welcome.lua
 
 Bootstrap.lua

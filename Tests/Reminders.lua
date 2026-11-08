@@ -1,5 +1,6 @@
--- Loads every addon file in toc order against a small client stub, then checks parsing, scheduling,
--- catch-up, delivery, snooze links, zone entry, every slash command and the window's flows.
+-- Loads every addon file in toc order against a small client stub, then checks the first-run welcome,
+-- parsing, scheduling, catch-up, delivery, snooze links, zone entry, every slash command, the window's
+-- flows and its help tip.
 --
 -- What it cannot prove: anything the real client decides. GetGameTime's realm clock, the raid warning
 -- frame, chat tab routing, sounds, LibDBIcon and every pixel of the window still need an in-game pass.
@@ -33,10 +34,30 @@ local ticker, focused
 local CHILDREN = { Instructions = true, ScrollBar = true, Inset = true, Text = true, Bg = true, TopTileStreaks = true,
     NineSlice = true, BackgroundTile = true, BGCornerTopLeft = true, BGCornerTopRight = true, BGCornerBottomLeft = true,
     BGCornerBottomRight = true }
-local created, textures = {}, {}
+local created, textures, fontStrings = {}, {}, {}
+
+-- A frame's OnShow or OnHide script and hook run when its visibility changes, and so do those of its
+-- shown children, as the client does when a parent shows or hides.
+local function visibilityChanged(frame, visible)
+    local name = visible and "OnShow" or "OnHide"
+    if frame.scripts[name] then frame.scripts[name](frame) end
+    if frame.hooks[name] then frame.hooks[name](frame) end
+    for _, child in ipairs(frame.children) do
+        if child.shown then visibilityChanged(child, visible) end
+    end
+end
+
+-- HelpTipTemplateMixin:Close as HelpTip.lua runs it on hide: the info goes, the acknowledge callback
+-- runs only for an acknowledged tip, and a tip still flagged shown hides.
+local function closeHelpTip(tip)
+    local info = tip.info
+    tip.info = nil
+    if info and tip.acknowledged and info.onAcknowledgeCallback then info.onAcknowledgeCallback() end
+    if tip.shown then tip:Hide() end
+end
 
 local function newRegion(kind, template)
-    local r = { kind = kind, template = template, scripts = {}, hooks = {}, shown = true, height = 0 }
+    local r = { kind = kind, template = template, scripts = {}, hooks = {}, children = {}, shown = true, height = 0 }
     local methods = {
         SetText = function(self, text) self.text = text end,
         GetText = function(self) return self.text or "" end,
@@ -46,15 +67,13 @@ local function newRegion(kind, template)
         GetScript = function(self, name) return self.scripts[name] end,
         HookScript = function(self, name, fn) self.hooks[name] = fn end,
         IsShown = function(self) return self.shown end,
+        IsVisible = function(self) return self.shown and (self.parent == nil or self.parent:IsVisible()) end,
         Show = function(self) self:SetShown(true) end,
         Hide = function(self) self:SetShown(false) end,
         SetShown = function(self, shown)
-            local was = self.shown
+            local was = self:IsVisible()
             self.shown = shown and true or false
-            if self.shown ~= was then
-                local script = self.scripts[self.shown and "OnShow" or "OnHide"]
-                if script then script(self) end
-            end
+            if self:IsVisible() ~= was then visibilityChanged(self, not was) end
         end,
         GetTextWidth = function() return 60 end,
         GetStringWidth = function() return 60 end,
@@ -72,7 +91,12 @@ local function newRegion(kind, template)
             return texture
         end,
         SetAtlas = function(self, atlas) self.atlas = atlas end,
-        CreateFontString = function() return newRegion("FontString") end,
+        CreateFontString = function(self)
+            local text = newRegion("FontString")
+            text.parent = self
+            fontStrings[#fontStrings + 1] = text
+            return text
+        end,
         SetEnabled = function(self, enabled) self.disabled = not enabled end,
         SetColorTexture = function(self, r, g, b, a) self.colorTexture = { r, g, b, a } end,
         IsEnabled = function(self) return not self.disabled end,
@@ -80,12 +104,22 @@ local function newRegion(kind, template)
         GetChecked = function(self) return self.checked or false end,
         SetFocus = function(self) focused = self end,
         ClearFocus = function(self) if focused == self then focused = nil end end,
+        -- HelpTipTemplateMixin (HelpTip.lua): Reset clears acknowledged, Init leaves it, Acknowledge
+        -- sets it and closes, as the tip's close button does.
+        Reset = function(self) self.info, self.acknowledged = nil, false end,
+        Init = function(self, _, info) self.info = info end,
+        Acknowledge = function(self)
+            self.acknowledged = true
+            closeHelpTip(self)
+        end,
     }
     setmetatable(r, {
         __index = function(t, k)
             if methods[k] then return methods[k] end
             if CHILDREN[k] then
                 local child = newRegion("Region")
+                child.parent = t
+                t.children[#t.children + 1] = child
                 rawset(t, k, child)
                 return child
             end
@@ -98,9 +132,11 @@ end
 
 function CreateFrame(kind, name, parent, template)
     local frame = newRegion(kind, template)
-    if kind == "Frame" or kind == "Button" or kind == "EditBox" or kind == "DropdownButton" then
-        frame.shown = true
+    if parent then
+        frame.parent = parent
+        parent.children[#parent.children + 1] = frame
     end
+    if template == "HelpTipTemplate" then frame.scripts.OnHide = closeHelpTip end
     created[#created + 1] = frame
     if name then _G[name] = frame end
     return frame
@@ -198,8 +234,20 @@ EventRegistry = {
 local function clickLink(link)
     for owner, fn in pairs(linkCallbacks) do fn(owner, link, "[link]", "LeftButton", DEFAULT_CHAT_FRAME) end
 end
-function GameTooltip_SetTitle() end
-function GameTooltip_AddNormalLine() end
+-- The client runs these once per event (EventUtil.lua). boot fires them.
+local onLoaded, onLogin = {}, {}
+EventUtil = {
+    ContinueOnAddOnLoaded = function(name, callback)
+        if name == "RemindMe" then onLoaded[#onLoaded + 1] = callback end
+    end,
+    ContinueOnPlayerLogin = function(callback) onLogin[#onLogin + 1] = callback end,
+}
+HelpTip = { width = 226, ButtonStyle = { Close = 2 }, Point = { RightEdgeCenter = 8 } }
+-- The last tooltip's lines, title first.
+local tooltipLines = {}
+function GameTooltip_SetTitle(_, text) tooltipLines = { text } end
+function GameTooltip_AddNormalLine(_, text) tooltipLines[#tooltipLines + 1] = text end
+function GameTooltip_AddErrorLine(_, text) tooltipLines[#tooltipLines + 1] = "error: " .. text end
 function GameTooltip_AddDisabledLine() end
 function GameTooltip_AddInstructionLine() end
 function GameTooltip_AddBlankLineToTooltip() end
@@ -225,26 +273,53 @@ function icon:AddButtonToCompartment() end
 function icon:Show() end
 function icon:Hide() end
 
-local ns = {}
-for _, file in ipairs({
+-- A client start with these saved variables: every addon file in toc order, then ADDON_LOADED and
+-- PLAYER_LOGIN. Returns the addon table and how many chat lines ADDON_LOADED printed; chat holds
+-- what login printed.
+local FILES = {
     "Core/Init.lua", "Core/Time.lua", "Core/Reminders.lua", "Core/Commands.lua",
-    "UI/Panel.lua", "UI/MinimapButton.lua", "Bootstrap.lua",
-}) do
-    load(file, ns)
+    "UI/Panel.lua", "UI/MinimapButton.lua", "UI/Welcome.lua", "Bootstrap.lua",
+}
+local function boot(savedVariables)
+    RemindMeDB = savedVariables
+    onLoaded, onLogin = {}, {}
+    wipe(linkCallbacks)
+    local addon = {}
+    for _, file in ipairs(FILES) do load(file, addon) end
+    chat = {}
+    for _, callback in ipairs(onLoaded) do callback() end
+    local loadLines = #chat
+    for _, callback in ipairs(onLogin) do callback() end
+    return addon, loadLines
 end
+
+-- === first-run welcome ===
+local WELCOME = "<gold>[Remind Me Later]</gold>: Reminds you of anything by countdown, time of day or zone, as a"
+    .. " whisper, a chat line or a raid warning. Open the <gold>|Haddon:RemindMe|h[Remind Me Later]|h</gold> window"
+    .. " or type /rm to add your first reminder."
+local ns, loadLines = boot(nil)
+check("the first load marks the first run and prints nothing", ns.firstRun == true and loadLines == 0)
+check("the first login prints one welcome line with the window link and /rm", #chat == 1 and chat[1] == WELCOME)
+local opened = 0
+ns.OpenPanel = function() opened = opened + 1 end
+clickLink("addon:RemindMe")
+check("a click on the welcome link opens the window", opened == 1)
+clickLink("addon:OtherAddon")
+clickLink(SECRET)
+check("another addon's link or a secret one opens nothing", opened == 1)
+
+local firstRunDB = RemindMeDB
+ns, loadLines = boot(firstRunDB)
+check("a later login prints nothing", ns.firstRun == false and loadLines == 0 and #chat == 0)
 
 local Time, Reminders = ns.Time, ns.Reminders
 local slash = SlashCmdList.REMINDME
 
--- Bootstrap's loader is the first frame Bootstrap created with a PLAYER_LOGIN script.
+-- The events frame of the last start is the one Reminders.Start made at login.
 local function fire(frame, event, ...) frame.scripts.OnEvent(frame, event, ...) end
-local loader, events
+local events
 for _, frame in ipairs(created) do
-    if frame.scripts.OnEvent then loader = loader or frame end
-end
-fire(loader, "PLAYER_LOGIN")
-for _, frame in ipairs(created) do
-    if frame.scripts.OnEvent and frame ~= loader then events = frame end
+    if frame.scripts.OnEvent then events = frame end
 end
 check("events frame created at login", events ~= nil)
 fire(events, "PLAYER_ENTERING_WORLD", true, false)
@@ -489,7 +564,8 @@ check("/rm in without text explains", last():find(ns.NEED_TEXT, 1, true) ~= nil)
 slash("in 5m monday tea")
 check("weekday on a countdown refused", last():find("Weekdays", 1, true) ~= nil and #db.reminders == 0)
 slash("bogus")
-check("unknown command points to help", last() == "<gold>[Remind Me Later]</gold>: Unknown command. Type /rm help for the list.")
+check("unknown command points to help and opens nothing",
+    last() == "<gold>[Remind Me Later]</gold>: Unknown command. Type /rm help for the list." and RemindMeFrame == nil)
 
 reset()
 slash("in 10m First")
@@ -556,9 +632,18 @@ local saveButton, newButton, deleteButton = bar[1], bar[2], bar[3]
 local kinds, outputs, days = window.kindRadios, window.outputRadios, window.dayChecks
 local timerRepeat, zoneRepeat = window.repeatChecks.timer, window.repeatChecks.zone
 local preview, dialog = window.preview, window.deleteDialog
-local hereButton
+local hereButton, tip
 for _, frame in ipairs(created) do
     if frame.text == "Current Zone" then hereButton = frame end
+    if frame.template == "HelpTipTemplate" then tip = frame end
+end
+local TIP = "Type a message and when it fires, then click Add Reminder to set it."
+local EMPTY = "No reminders yet. Add one on the right."
+local function emptyShown()
+    for _, text in ipairs(fontStrings) do
+        if text.text == EMPTY then return text:IsVisible() end
+    end
+    return false
 end
 
 local function rows()
@@ -608,6 +693,21 @@ check("Add waits for a complete form", saveButton.disabled)
 check("the picks start on Countdown and Whisper", kinds.timer.checked and not kinds.clock.checked and outputs.whisper.checked)
 check("a countdown shows Repeat, not the clock or the weekdays", timerRepeat.shown and not window.localCheck.shown and not hereButton.shown)
 check("the empty preview says what a countdown does", preview.text == "Fires once the countdown runs out.")
+check("the empty list says how to fill it", emptyShown())
+
+-- Onboarding: the help tip at Add Reminder and a tooltip on every control.
+check("the help tip shows at Add Reminder on the first open", tip and tip.parent == saveButton and tip.shown
+    and tip.info.text == TIP and tip.info.targetPoint == HelpTip.Point.RightEdgeCenter and not db.tipSeen)
+local CONTROLS = { UIPanelButtonTemplate = true, MagicButtonTemplate = true, InputBoxInstructionsTemplate = true,
+    UIRadioButtonTemplate = true, CheckboxWithLabelTemplate = true }
+local bare = 0
+for _, frame in ipairs(created) do
+    if CONTROLS[frame.template] and not (frame.scripts.OnEnter or frame.hooks.OnEnter) then bare = bare + 1 end
+end
+check("every control has a tooltip", bare == 0)
+saveButton.hooks.OnEnter(saveButton)
+check("a disabled Add Reminder says why", tooltipLines[1] == "Add Reminder"
+    and tooltipLines[#tooltipLines] == "error: Type a message and when it fires first.")
 
 typeInto(textBox, "Check mail")
 typeInto(valueBox, "soon")
@@ -621,6 +721,7 @@ check("Repeat previews the next turns", preview.text == "Fires in 900s, then eve
 click(timerRepeat)
 window:SaveForm()
 check("form adds a countdown", #db.reminders == 1 and db.reminders[1].seconds == 900 and db.reminders[1].output == "whisper" and db.reminders[1].rep == false)
+check("the first reminder retires the help tip and fills the list", db.tipSeen == true and not tip.shown and not emptyShown())
 check("form clears its fields and confirms", textBox.text == "" and valueBox.text == "" and window.status.text == "Added.")
 typeInto(textBox, "x")
 check("typing clears the confirmation", window.status.text ~= "Added.")
@@ -739,6 +840,32 @@ slash("edit 2")
 check("/rm edit opens the window on that reminder", window.shown and textBox.text == "Second" and saveButton.text == "Save")
 slash("edit 9")
 check("/rm edit with a bad number explains", last():find("/rm list", 1, true) ~= nil)
+
+-- === intro and the welcome link ===
+slash("")
+slash("")
+check("a retired tip stays away", window.shown and not tip.shown)
+before = #chat
+slash("intro")
+check("/rm intro prints the welcome line once", #chat == before + 1 and last() == WELCOME)
+check("/rm intro shows the tip at once in the open window", tip.shown and tip.info ~= nil and db.tipSeen == nil)
+slash("")
+check("the tip hides with the window without counting as seen", not tip:IsVisible() and db.tipSeen == nil)
+slash("")
+check("it shows again at the next open", tip.shown and tip.info ~= nil)
+tip:Acknowledge()
+check("its close button retires it for good", db.tipSeen == true and not tip.shown)
+
+slash("")
+before = #chat
+clickLink("addon:RemindMe")
+check("the welcome link opens the window", window.shown and #chat == before)
+clickLink("addon:RemindMe")
+check("a second click keeps it open", window.shown)
+slash("")
+clickLink("addon:OtherAddon")
+clickLink(SECRET)
+check("another addon's link or a secret one opens nothing", not window.shown and #chat == before)
 print = realPrint
 print(string.format("%d passed, %d failed", passes, failures))
 os.exit(failures == 0 and 0 or 1)
