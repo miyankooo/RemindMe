@@ -5,6 +5,4 @@ manual-changelog:
   markup-type: markdown
 
 ignore:
-  - Tests
-  - Tools
   - release-please-config.json
