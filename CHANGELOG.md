@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/miyankooo/RemindMe/compare/v1.0.0...v1.1.0) (2026-11-23)
+
+
+### Features
+
+* A reminder that fires once stays on the list with its note or checklist ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* Alerts arrive as a whisper or a chat line, without the raid warning and the snooze link ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* Changes save as you type, and New Reminder starts a reminder in the window ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* Each reminder has a title with a note of up to 255 characters or a checklist ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* Reminders without a trigger stay on the list as notes and to-do lists ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* The alert shows the title as a link that opens the reminder in the window ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+* The list shows each title in full with its trigger and checklist progress ([6e14725](https://github.com/miyankooo/RemindMe/commit/6e147254c1c7d15b2d540fb5134af77e0e36d465))
+
 ## 1.0.0 (2026-11-13)
 
 
