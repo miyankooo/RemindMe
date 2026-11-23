@@ -57,13 +57,13 @@ local setMinimapShown
 -- The minimap button and the addon menu entry share this click and tooltip. Its position lives in
 -- the account-wide table, so every character shares it.
 function ns.SetupLauncher()
-    setMinimapShown = CreateLauncher(ns.ICON, RemindMeDB.minimap, function() ns.TogglePanel() end, fillTooltip)
+    setMinimapShown = CreateLauncher(ns.ICON, SimpleRemindersDB.minimap, function() ns.TogglePanel() end, fillTooltip)
 end
 
 -- /rm minimap flips only the minimap button. The addon menu entry always stays as the way back.
 -- Hiding says how to undo it; showing needs no line, since the button itself appears.
 function ns.ToggleMinimap()
-    local show = RemindMeDB.minimap.hide
+    local show = SimpleRemindersDB.minimap.hide
     setMinimapShown(show)
     if not show then ns.Print("Minimap button hidden. Type /rm minimap to show it again.") end
 end

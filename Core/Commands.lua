@@ -205,5 +205,6 @@ local function handleSlash(msg)
     end
 end
 
-SLASH_REMINDME1, SLASH_REMINDME2 = "/remindme", "/rm"
-SlashCmdList.REMINDME = handleSlash
+SLASH_SIMPLEREMINDERS1, SLASH_SIMPLEREMINDERS2 = "/simplereminders", "/sr"
+SLASH_SIMPLEREMINDERS3, SLASH_SIMPLEREMINDERS4 = "/remindme", "/rm"
+SlashCmdList.SIMPLEREMINDERS = handleSlash

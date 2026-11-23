@@ -1,12 +1,12 @@
 ## Interface: 16001
-## Title: Remind Me Later
+## Title: Simple Reminders
 ## Notes: Reminders with a note or a checklist, by countdown, time of day or zone, sent as a whisper or a chat line.
 ## Author: miyanko
 ## Version: @project-version@
 ## Category: Miscellaneous
 ## IconTexture: Interface\Icons\INV_Misc_Bell_01
 ## X-Curse-Project-ID: 1786009
-## SavedVariables: RemindMeDB
+## SavedVariables: SimpleRemindersDB
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua

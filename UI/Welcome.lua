@@ -18,7 +18,7 @@ end
 
 -- /rm intro: the welcome line now, and the help tip again, at once in an open window.
 function ns.ReplayIntro()
-    RemindMeDB.tipSeen = nil
+    SimpleRemindersDB.tipSeen = nil
     ns.PrintWelcome()
     ns.ShowTip()
 end

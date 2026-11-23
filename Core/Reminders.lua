@@ -15,7 +15,7 @@ ns.NEED_ZONE = "Type a zone, such as Stormwind City."
 local inside = {}
 
 local function list()
-    return RemindMeDB.reminders
+    return SimpleRemindersDB.reminders
 end
 
 -- Timed reminders by due time, then zone reminders in the order added. The window and /rm list
@@ -175,7 +175,7 @@ function Reminders.Preview(output, text)
     DELIVER[output](text)
 end
 
--- The title as an addon link (|Haddon:RemindMe:open:<id>|h) that opens the reminder in the window.
+-- The title as an addon link (|Haddon:SimpleReminders:open:<id>|h) that opens the reminder in the window.
 -- Blizzard's chat hands a click on it to the SetItemRef callback (ItemRefHandlersShared.lua). Gold
 -- is the colour of Blizzard's own chat links such as club invites (ItemRef.lua) and of the welcome
 -- line's link. Ids stay with a reminder, so a link from before a /reload still finds it.
@@ -266,7 +266,7 @@ function Reminders.Add(r)
     r, problem = check(r)
     if not r then return nil, problem end
 
-    local db = RemindMeDB
+    local db = SimpleRemindersDB
     r.id = db.nextId
     db.nextId = db.nextId + 1
     schedule(r, GetServerTime())

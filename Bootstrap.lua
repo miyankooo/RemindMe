@@ -4,9 +4,9 @@ local addonName, ns = ...
 -- ADDON_LOADED, and a missing table marks the account's first run, which the welcome line reads at
 -- login. Reminders are account-wide, so a reminder fires on whichever character is online.
 EventUtil.ContinueOnAddOnLoaded(addonName, function()
-    ns.firstRun = RemindMeDB == nil
-    RemindMeDB = RemindMeDB or {}
-    local db = RemindMeDB
+    ns.firstRun = SimpleRemindersDB == nil
+    SimpleRemindersDB = SimpleRemindersDB or {}
+    local db = SimpleRemindersDB
     db.minimap = db.minimap or { hide = false, minimapPos = 235 }
     db.window = db.window or {}
     db.reminders = db.reminders or {}

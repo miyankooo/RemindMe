@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/miyankooo/RemindMe/main/.github/icon.png" width="64" height="64" alt="">
+<img src="https://raw.githubusercontent.com/miyankooo/SimpleReminders/main/.github/icon.png" width="64" height="64" alt="">
 
-# Remind Me Later
+# Simple Reminders
 
 A WoW Forever reminder and to-do addon. Each reminder has a title and a note or a checklist, and can fire by countdown, time of day or zone. The alert arrives as a whisper or a chat line that only you see, with the title as a link that opens the reminder.
 

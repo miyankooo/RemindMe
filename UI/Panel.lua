@@ -273,10 +273,10 @@ local function AttachTip(target, text, targetPoint, relativeRegion)
         text = text,
         buttonStyle = HelpTip.ButtonStyle.Close,
         targetPoint = targetPoint,
-        onAcknowledgeCallback = function() RemindMeDB.tipSeen = true end,
+        onAcknowledgeCallback = function() SimpleRemindersDB.tipSeen = true end,
     }
     local function ShowTip()
-        if RemindMeDB.tipSeen or (tip and tip:IsShown()) then return end
+        if SimpleRemindersDB.tipSeen or (tip and tip:IsShown()) then return end
         if not tip then
             tip = CreateFrame("Frame", nil, target, "HelpTipTemplate")
             tip.width = HelpTip.width
@@ -291,7 +291,7 @@ local function AttachTip(target, text, targetPoint, relativeRegion)
 
     -- The player used the feature: the tip goes for good, shown or not.
     local function Retire()
-        if tip and tip.info then tip:Acknowledge() else RemindMeDB.tipSeen = true end
+        if tip and tip.info then tip:Acknowledge() else SimpleRemindersDB.tipSeen = true end
     end
     return ShowTip, Retire
 end
@@ -720,7 +720,7 @@ end
 -- Delete asks first, as the macro window's Delete does (CONFIRM_DELETE_SELECTED_MACRO), and names the
 -- reminder it would remove. Accept sits left of Cancel, as on Blizzard's popups.
 local function createDeleteDialog()
-    local dialog = CreateDialog("RemindMeDeleteDialog", ns.title, DIALOG_W)
+    local dialog = CreateDialog("SimpleRemindersDeleteDialog", ns.title, DIALOG_W)
     dialog:AddText(GameFontHighlight, "Delete this reminder?")
     dialog.subject = dialog:AddText(GameFontDisable, "", TIGHT)
     dialog.subject:SetWordWrap(false)
@@ -871,7 +871,7 @@ local function createWhen(editor)
 end
 
 local function buildPanel()
-    local frame = CreateWindow("RemindMeFrame", ns.title, ns.ICON, PANEL_W, PANEL_H, RemindMeDB.window)
+    local frame = CreateWindow("SimpleRemindersFrame", ns.title, ns.ICON, PANEL_W, PANEL_H, SimpleRemindersDB.window)
     local left, right = createColumns(frame)
     createAtticHelp(frame)
 
