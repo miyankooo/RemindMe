@@ -2,7 +2,7 @@ local addonName, ns = ...
 
 -- Loads last, so every Core and UI file has registered itself. The saved variables arrive with
 -- ADDON_LOADED, and a missing table marks the account's first run, which the welcome line reads at
--- login. Reminders are account-wide, so a reminder fires on whichever character is online.
+-- login. Reminders are account-wide unless one is kept to a single character.
 EventUtil.ContinueOnAddOnLoaded(addonName, function()
     ns.firstRun = SimpleRemindersDB == nil
     SimpleRemindersDB = SimpleRemindersDB or {}

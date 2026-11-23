@@ -18,11 +18,19 @@ local function list()
     return SimpleRemindersDB.reminders
 end
 
--- Timed reminders by due time, then zone reminders in the order added. The window and /rm list
--- share this order, so /rm remove takes the numbers /rm list shows.
+-- A reminder is account-wide, or kept to the character whose GUID it holds, which alone sees it and
+-- is alerted by it.
+local function mine(r)
+    return r.character == nil or r.character == ns.character
+end
+
+-- This character's reminders: timed ones by due time, then zone reminders in the order added. The
+-- window and /rm list share this order, so /rm remove takes the numbers /rm list shows.
 function Reminders.Sorted()
     local sorted = {}
-    for i, r in ipairs(list()) do sorted[i] = r end
+    for _, r in ipairs(list()) do
+        if mine(r) then sorted[#sorted + 1] = r end
+    end
     table.sort(sorted, function(a, b)
         if (a.due == nil) ~= (b.due == nil) then return a.due ~= nil end
         if a.due and a.due ~= b.due then return a.due < b.due end
@@ -240,7 +248,7 @@ function Reminders.Plan(spec, now)
 end
 
 -- Everything an edit may change. id and due stay with the stored reminder.
-local FIELDS = { "kind", "title", "body", "note", "items", "output", "rep", "seconds", "hour", "minute", "realm", "zone" }
+local FIELDS = { "kind", "title", "body", "note", "items", "output", "rep", "seconds", "hour", "minute", "realm", "zone", "character" }
 
 -- Rewrites a stored reminder in place, so it keeps its id and its place in the list. A countdown
 -- keeps running unless its length or trigger changed. A time of day is rescheduled from its new
@@ -284,9 +292,9 @@ function Reminders.Remove(r)
     ns.RefreshPanel()
 end
 
+-- Only this character's reminders, so other characters keep theirs.
 function Reminders.Clear()
-    wipe(list())
-    wipe(inside)
+    for _, r in ipairs(Reminders.Sorted()) do remove(r) end
     ns.RefreshPanel()
 end
 
@@ -296,7 +304,7 @@ local function tick()
     local reminders = list()
     for i = #reminders, 1, -1 do
         local r = reminders[i]
-        if r.due and r.due <= now then Reminders.Fire(r, now) end
+        if r.due and r.due <= now and mine(r) then Reminders.Fire(r, now) end
     end
 end
 
@@ -308,7 +316,7 @@ local function checkZones(fire)
     local reminders = list()
     for i = #reminders, 1, -1 do
         local r = reminders[i]
-        if r.kind == "zone" then
+        if r.kind == "zone" and mine(r) then
             local here = inZone(r)
             if here and fire and not inside[r.id] then
                 inside[r.id] = true
@@ -367,6 +375,7 @@ local ZONE_EVENTS = { "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_
 -- after the loading screen instead of under it. Logging in inside a reminder's zone counts as
 -- entering it.
 function Reminders.Start()
+    ns.character = UnitGUID("player")
     for _, r in ipairs(list()) do migrate(r) end
     catchUp()
     EventRegistry:RegisterCallback("SetItemRef", onLink, Reminders)

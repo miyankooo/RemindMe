@@ -79,12 +79,13 @@ local function CreateCheckbox(parent, label)
     return checkbox
 end
 
--- UIRadioButtonTemplate, 16 px, centred in a 24 px row like the checkbox, with the same clickable body label.
--- The caller unchecks the other radios of its group in OnClick.
-local RADIO_SIZE = 16
+-- UIRadialButtonTemplate (Shared/Button/CheckButtonTemplates.xml:26), the radial tick of Blizzard's dropdown menus at
+-- its 18 px atlas size, centred in a 24 px row like the checkbox, with the same clickable body label. The caller
+-- unchecks the other radios of its group in OnClick.
+local RADIO_SIZE = 18
 local RADIO_INSET = (24 - RADIO_SIZE) / 2
 local function CreateRadio(parent, label)
-    local radio = CreateFrame("CheckButton", nil, parent, "UIRadioButtonTemplate")
+    local radio = CreateFrame("CheckButton", nil, parent, "UIRadialButtonTemplate")
     radio.label = CreateText(radio, GameFontHighlight)
     radio.label:SetPoint("LEFT", radio, "RIGHT", 4 + RADIO_INSET, 0)
     radio.label:SetText(label)
@@ -358,33 +359,17 @@ local function CreateWindow(name, title, icon, width, height, position)
     return frame
 end
 
--- A MagicButtonTemplate bar button, 128 wide: the first takes the bottom-right corner, later ones chain leftwards.
--- MagicButton_OnLoad runs after the anchor so Blizzard applies its corner and neighbour spacing.
-local function AddBarButton(window, label, onClick, width)
-    local button = CreateFrame("Button", nil, window, "MagicButtonTemplate")
-    button:SetWidth(width or 128)
-    window.barButtons = window.barButtons or {}
-    local previous = window.barButtons[#window.barButtons]
-    if previous then
-        button:SetPoint("RIGHT", previous, "LEFT")
-    else
-        button:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT")
-    end
-    MagicButton_OnLoad(button)
-    button:SetText(label)
-    button:SetScript("OnClick", onClick)
-    window.barButtons[#window.barButtons + 1] = button
-    return button
-end
+-- The button bar: the window's 4 px bottom border, a gap, a row-tall button and a gap. The template's 26 px bar fits
+-- a 22 px button flush to its edges only, so the inset ends at this height instead.
+local BAR_BORDER = 4
+local BAR_H = BAR_BORDER + GAP + ROW + GAP
 
--- A destructive bar button, such as Delete, takes the bottom-left corner, as the macro window places its Delete.
-local function AddBarButtonLeft(window, label, onClick, width)
-    local button = CreateFrame("Button", nil, window, "MagicButtonTemplate")
-    button:SetWidth(width or 128)
-    button:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT")
-    MagicButton_OnLoad(button)
-    button:SetText(label)
-    button:SetScript("OnClick", onClick)
+-- A bar button, 128 wide and a row tall, a gap above the bottom border and lined up with the padded content above
+-- it: a destructive one such as Delete in the bottom-left corner, as the macro window places its Delete, the others
+-- in the bottom-right. x is the content's padded edge.
+local function CreateBarButton(window, label, point, x)
+    local button = CreateButton(window, label, 128)
+    button:SetPoint(point, x, BAR_BORDER + GAP)
     return button
 end
 
@@ -500,18 +485,21 @@ local DAYS_H = DAY_ROWS * ROW + (DAY_ROWS - 1) * TIGHT
 -- The preview line under the trigger has room for two lines.
 local PREVIEW_H = 32
 
--- When at its tallest, a time of day: the dropdown, Use Local Time, the weekdays, the preview and the outputs.
-local WHEN_CLOCK_H = ROW + GAP + ROW + GAP + DAYS_H + GAP + PREVIEW_H + GAP + ROW
+-- When's body at its tallest, a time of day: the dropdown, Use Local Time, the weekdays and the preview.
+local WHEN_CLOCK_H = ROW + GAP + ROW + GAP + DAYS_H + GAP + PREVIEW_H
 
--- The note or checklist keeps at least five checklist rows beside the tallest When.
-local CONTENT_MIN = 5 * ITEM_PITCH
+-- Alert: the outputs with Test, then Character Specific.
+local ALERT_H = SECTION_BODY_TOP + ROW + GAP + ROW
 
-local EDITOR_H = CONTENT_TOP + CONTENT_MIN + SECTION_GAP + SECTION_BODY_TOP + WHEN_CLOCK_H
+-- The note or checklist keeps at least four checklist rows beside the tallest When.
+local CONTENT_MIN = 4 * ITEM_PITCH
+
+local EDITOR_H = CONTENT_TOP + CONTENT_MIN + SECTION_GAP + SECTION_BODY_TOP + WHEN_CLOCK_H + SECTION_GAP + ALERT_H
 
 -- The template's attic keeps the columns below the portrait, which hangs 55px down from the top edge
--- (Mainline/SharedUIPanelTemplates.xml:584). The attic and button bar offsets (60 and 26) are off
--- the grid, so the height snaps up and the extra px fall to the note or checklist.
-local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + 2 * PADDING + EDITOR_H + PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+-- (Mainline/SharedUIPanelTemplates.xml:584). The attic offset (60) is off the grid, so the height snaps up and the
+-- extra px fall to the note or checklist.
+local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + 2 * PADDING + EDITOR_H + BAR_H)
 
 local DIALOG_W = 400
 
@@ -558,6 +546,9 @@ local TEXT = {
         print = "A yellow line in your main chat tab, without a sound.",
     },
     TITLE_TIP = "What the reminder is about. Its alert in chat shows the title as a link that opens it here.",
+    CHARACTER_LABEL = "Character Specific",
+    CHARACTER_TIP = "Keeps the reminder to this character: only it lists the reminder and gets its alert. Unticked, every character on the account has it.",
+    NEVER_FIRES = "Pick a trigger under When first.",
     WHEN_TIP = "What makes the reminder fire. With None it never fires.",
     TIMER_REPEAT_TIP = "Starts the countdown again each time it fires.",
     ZONE_REPEAT_TIP = "Fires on every entry, not only the next one.",
@@ -575,6 +566,7 @@ local TEXT = {
 local function picksOf(r)
     local picks = {
         kind = r.kind, output = r.output, body = r.body, realm = ns.DefaultRealm(), rep = false, days = {}, items = {},
+        character = r.character ~= nil,
     }
     if r.kind == "clock" then
         picks.realm = r.realm
@@ -608,38 +600,31 @@ end
 
 local panel
 
--- A title and one help line. Buttons and hint boxes keep their template's own handlers.
-local function fillTip(title, text)
-    return function(tooltip)
+-- A title and one help line. A control that can be off says why in a red line, as Blizzard's dungeon finder does,
+-- so it takes the mouse while disabled too.
+local function fillTip(frame, title, text, whyOff)
+    if whyOff then frame:SetMotionScriptsWhileDisabled(true) end
+    return function(tooltip, self)
         GameTooltip_SetTitle(tooltip, title)
         GameTooltip_AddNormalLine(tooltip, text, true)
+        if whyOff and not self:IsEnabled() then GameTooltip_AddErrorLine(tooltip, whyOff, true) end
     end
 end
 
-local function attachTip(frame, title, text)
-    AttachTooltip(frame, fillTip(title, text))
+local function attachTip(frame, title, text, whyOff)
+    AttachTooltip(frame, fillTip(frame, title, text, whyOff))
 end
 
-local function hookTip(frame, title, text)
-    HookTooltip(frame, fillTip(title, text))
-end
-
--- A bar button explains why it is off, as Blizzard's dungeon finder does, so it takes the mouse while
--- disabled too.
-local function hookBarTip(button, title, text, whyOff)
-    button:SetMotionScriptsWhileDisabled(true)
-    HookTooltip(button, function(tooltip, self)
-        GameTooltip_SetTitle(tooltip, title)
-        GameTooltip_AddNormalLine(tooltip, text, true)
-        if not self:IsEnabled() then GameTooltip_AddErrorLine(tooltip, whyOff, true) end
-    end)
+-- Buttons and hint boxes keep their template's own handlers.
+local function hookTip(frame, title, text, whyOff)
+    HookTooltip(frame, fillTip(frame, title, text, whyOff))
 end
 
 -- Radios and checkboxes with their tooltips. The caller anchors a radio by its LEFT edge, RADIO_INSET
 -- into a row, so radio and checkbox labels start at the same x.
-local function createRadio(parent, label, tip)
+local function createRadio(parent, label, tip, whyOff)
     local radio = CreateRadio(parent, label)
-    attachTip(radio, label, tip)
+    attachTip(radio, label, tip, whyOff)
     return radio
 end
 
@@ -663,10 +648,10 @@ local function placeSlot(slot, body, top)
 end
 
 -- Radios in a row, each a padding step after the label before it.
-local function createRadioRow(slot, keys, labels, tips)
+local function createRadioRow(slot, keys, labels, tips, whyOff)
     local radios, previous = {}, nil
     for _, key in ipairs(keys) do
-        local radio = createRadio(slot, labels[key], tips[key])
+        local radio = createRadio(slot, labels[key], tips[key], whyOff)
         if previous then
             radio:SetPoint("LEFT", previous.label, "RIGHT", PADDING + RADIO_INSET, 0)
         else
@@ -683,11 +668,11 @@ end
 -- splits them in the middle of the gap, as high as the padded content.
 local function createColumns(frame)
     local left = frame.Inset
-    left:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", PANEL_INSET_LEFT_OFFSET + COLUMN_W, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+    left:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", PANEL_INSET_LEFT_OFFSET + COLUMN_W, BAR_H)
 
     local right = CreateFrame("Frame", nil, frame)
     right:SetPoint("TOPLEFT", left, "TOPRIGHT", GAP, 0)
-    right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", PANEL_INSET_RIGHT_OFFSET, PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+    right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", PANEL_INSET_RIGHT_OFFSET, BAR_H)
 
     local background = frame.Background
     background:ClearAllPoints()
@@ -787,12 +772,12 @@ local function styleItem(row, item)
     row.box:SetTextColor((item and item.done and GRAY_FONT_COLOR or HIGHLIGHT_FONT_COLOR):GetRGB())
 end
 
--- When, held to the detail's bottom: the trigger dropdown with its value, the trigger's own options, the weekdays
--- of a time of day, the preview line and the outputs.
-local function createWhen(editor)
+-- When, a section break above Alert: the trigger dropdown with its value, the trigger's own options, the weekdays of a
+-- time of day and the preview line, last, so a one-line preview leaves its spare line at the section's end.
+local function createWhen(editor, alert)
     local when = CreateSection(editor, "When")
-    when:SetPoint("BOTTOMLEFT")
-    when:SetPoint("BOTTOMRIGHT")
+    when:SetPoint("BOTTOMLEFT", alert, "TOPLEFT", 0, SECTION_GAP)
+    when:SetPoint("BOTTOMRIGHT", alert, "TOPRIGHT", 0, SECTION_GAP)
     local body = when.body
 
     when.kindDropdown = CreateDropdown(body, KIND_W)
@@ -829,12 +814,6 @@ local function createWhen(editor)
     when.preview:SetJustifyV("TOP")
     when.preview:SetWordWrap(true)
 
-    local sendSlot = createSlot(body, ROW)
-    when.outputRadios = createRadioRow(sendSlot, ns.OUTPUTS, ns.OUTPUT_LABELS, TEXT.OUTPUT_TIPS)
-    when.testButton = CreateButton(sendSlot, "Test")
-    when.testButton:SetPoint("RIGHT")
-    hookTip(when.testButton, "Test", "Shows the alert once now, the way it arrives.")
-
     -- The trigger decides which fields show. A countdown has Repeat, a time of day Use Local Time and the
     -- weekdays, a zone Every Time and the Current Zone button. None shows only its preview line.
     function when:Layout(kind)
@@ -858,16 +837,41 @@ local function createWhen(editor)
         self.preview:ClearAllPoints()
         self.preview:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
         self.preview:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
-        top = top + PREVIEW_H
-        sendSlot:SetShown(not isNone)
-        if not isNone then
-            placeSlot(sendSlot, body, top + GAP)
-            top = top + GAP + ROW
-        end
-        self:SetHeight(SECTION_BODY_TOP + top)
+        self:SetHeight(SECTION_BODY_TOP + top + PREVIEW_H)
     end
 
     return when
+end
+
+-- Alert, held to the detail's bottom: the outputs with Test, then Character Specific. The outputs and Test grey out
+-- while the reminder never fires, as Blizzard's Settings grey a row that does not apply, so nothing moves.
+local function createAlert(editor)
+    local alert = CreateSection(editor, "Alert")
+    alert:SetPoint("BOTTOMLEFT")
+    alert:SetPoint("BOTTOMRIGHT")
+    alert:SetHeight(ALERT_H)
+    local body = alert.body
+
+    local sendSlot = createSlot(body, ROW)
+    placeSlot(sendSlot, body, 0)
+    alert.outputRadios = createRadioRow(sendSlot, ns.OUTPUTS, ns.OUTPUT_LABELS, TEXT.OUTPUT_TIPS, TEXT.NEVER_FIRES)
+    alert.testButton = CreateButton(sendSlot, "Test")
+    alert.testButton:SetPoint("RIGHT")
+    hookTip(alert.testButton, "Test", "Shows the alert once now, the way it arrives.", TEXT.NEVER_FIRES)
+
+    alert.characterCheck = createCheck(body, TEXT.CHARACTER_LABEL, TEXT.CHARACTER_TIP)
+    alert.characterCheck:SetPoint("TOPLEFT", 0, -(ROW + GAP))
+
+    function alert:SetFires(fires)
+        for _, radio in pairs(self.outputRadios) do
+            radio:SetEnabled(fires)
+            radio:GetCheckedTexture():SetDesaturated(not fires)
+            radio.label:SetFontObject(fires and GameFontHighlight or GameFontDisable)
+        end
+        self.testButton:SetEnabled(fires)
+    end
+
+    return alert
 end
 
 local function buildPanel()
@@ -903,12 +907,13 @@ local function buildPanel()
     placeSlot(bodySlot, editor, ROW + GAP)
     local bodyRadios = createRadioRow(bodySlot, ns.BODIES, ns.BODY_LABELS, TEXT.BODY_TIPS)
 
-    -- When, held to the detail's bottom; the note or checklist fills the space above it down to a section
-    -- break, so it grows while the trigger needs fewer fields.
-    local when = createWhen(editor)
+    -- Alert at the detail's bottom and When above it; the note or checklist fills the space above When down to a
+    -- section break, so it grows while the trigger needs fewer fields.
+    local alert = createAlert(editor)
+    local outputRadios, characterCheck = alert.outputRadios, alert.characterCheck
+    local when = createWhen(editor, alert)
     local valueBox, preview = when.valueBox, when.preview
-    local timerRepeat, localCheck, zoneRepeat = when.timerRepeat, when.localCheck, when.zoneRepeat
-    local dayChecks, outputRadios = when.dayChecks, when.outputRadios
+    local timerRepeat, localCheck, zoneRepeat, dayChecks = when.timerRepeat, when.localCheck, when.zoneRepeat, when.dayChecks
 
     local note = CreateNoteBox(editor, TEXT.NOTE_HINT, BODY_W - 2 * INPUT_CAP, ns.MAX_LETTERS)
     note:SetPoint("TOPLEFT", INPUT_CAP, -(CONTENT_TOP + INPUT_CAP))
@@ -925,11 +930,13 @@ local function buildPanel()
         GameTooltip_AddNormalLine(tooltip, TEXT.VALUE_TIPS[form.kind], true)
     end)
 
-    local newButton = AddBarButton(frame, TEXT.NEW_LABEL, function() frame:NewReminder() end)
-    local deleteButton = AddBarButtonLeft(frame, DELETE, function() frame:DeleteSelected() end)
+    local newButton = CreateBarButton(frame, TEXT.NEW_LABEL, "BOTTOMRIGHT", PANEL_INSET_RIGHT_OFFSET - PADDING)
+    local deleteButton = CreateBarButton(frame, DELETE, "BOTTOMLEFT", PANEL_INSET_LEFT_OFFSET + PADDING)
+    newButton:SetScript("OnClick", function() frame:NewReminder() end)
+    deleteButton:SetScript("OnClick", function() frame:DeleteSelected() end)
     local deleteDialog = createDeleteDialog()
-    hookBarTip(newButton, TEXT.NEW_LABEL, "Adds a reminder and opens it here.")
-    hookBarTip(deleteButton, DELETE, "Removes the reminder shown here, after asking.", "Pick a reminder on the left first.")
+    hookTip(newButton, TEXT.NEW_LABEL, "Adds a reminder and opens it here.")
+    hookTip(deleteButton, DELETE, "Removes the reminder shown here, after asking.", "Pick a reminder on the left first.")
     local showTip, retireTip = AttachTip(newButton, TEXT.TIP_TEXT, HelpTip.Point.RightEdgeCenter)
     frame.showTip = showTip
 
@@ -965,6 +972,7 @@ local function buildPanel()
         spec.body = form.body
         spec.note = note.EditBox:GetText()
         spec.items = form.items
+        spec.character = form.character and ns.character or nil
         Reminders.Update(selected, spec)
     end
 
@@ -1045,6 +1053,8 @@ local function buildPanel()
     local function showPicks()
         for body, radio in pairs(bodyRadios) do radio:SetChecked(body == form.body) end
         for output, radio in pairs(outputRadios) do radio:SetChecked(output == form.output) end
+        alert:SetFires(form.kind ~= "none")
+        characterCheck:SetChecked(form.character)
         timerRepeat:SetChecked(form.rep)
         zoneRepeat:SetChecked(form.rep)
         localCheck:SetChecked(not form.realm)
@@ -1238,6 +1248,11 @@ local function buildPanel()
         end)
     end
 
+    characterCheck:SetScript("OnClick", function(check)
+        form.character = check:GetChecked()
+        commit()
+    end)
+
     local function onRepeat(check)
         form.rep = check:GetChecked()
         showPicks()
@@ -1260,7 +1275,7 @@ local function buildPanel()
         end)
     end
 
-    when.testButton:SetScript("OnClick", function()
+    alert.testButton:SetScript("OnClick", function()
         local title = ns.trim(titleBox:GetText())
         Reminders.Preview(form.output, title ~= "" and title or ns.UNTITLED)
     end)
