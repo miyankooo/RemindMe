@@ -7,14 +7,26 @@ ns.title = C_AddOns.GetAddOnMetadata(addonName, "Title")
 -- The bell from the toc's IconTexture, file 133706.
 ns.ICON = "Interface\\Icons\\INV_Misc_Bell_01"
 
--- What starts a reminder, in the order the window and /rm help offer them.
-ns.KINDS = { "timer", "clock", "zone" }
-ns.KIND_LABELS = { timer = "Countdown", clock = "Time of Day", zone = ZONE }
+-- What starts a reminder, in the order the window offers them. None keeps it as a note or list
+-- that never fires.
+ns.KINDS = { "none", "timer", "clock", "zone" }
+ns.KIND_LABELS = { none = NONE, timer = "Countdown", clock = "Time of Day", zone = ZONE }
 
--- How a reminder reaches the player, with Blizzard's own names for the three chat types.
-ns.OUTPUTS = { "whisper", "print", "warning" }
-ns.OUTPUT_LABELS = { whisper = WHISPER, print = CHAT, warning = RAID_WARNING }
+-- How a reminder reaches the player, with Blizzard's own names for the two chat types.
+ns.OUTPUTS = { "whisper", "print" }
+ns.OUTPUT_LABELS = { whisper = WHISPER, print = CHAT }
 ns.DEFAULT_OUTPUT = "whisper"
+
+-- What a reminder holds under its title: a note or a checklist.
+ns.BODIES = { "note", "checklist" }
+ns.BODY_LABELS = { note = "Note", checklist = "Checklist" }
+
+-- A reminder's title, note and checklist items each take up to this many letters, a chat line's
+-- length.
+ns.MAX_LETTERS = 255
+
+-- The list and the alerts name a reminder without a title by this.
+ns.UNTITLED = "New Reminder"
 
 -- Weekdays in date("*t").wday numbering (1 is Sunday), listed from Monday as players read a week.
 ns.WEEK_ORDER = { 2, 3, 4, 5, 6, 7, 1 }
@@ -22,9 +34,6 @@ ns.WEEK_ORDER = { 2, 3, 4, 5, 6, 7, 1 }
 -- A repeating reminder that came due more than this long before login is skipped to its next
 -- turn, so a daily reminder never fires hours late. A one-time reminder always fires.
 ns.MISSED_GRACE = 60
-
--- The snooze link in a fired reminder's chat line brings it back once after this long.
-ns.SNOOZE = 600
 
 -- Every chat line goes through here: the bracketed title in the gold of Blizzard's own chat links,
 -- then the message in the chat frame's own colour.

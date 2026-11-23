@@ -12,8 +12,8 @@ local function SurfaceLink(label)
 end
 
 function ns.PrintWelcome()
-    ns.Print("Reminds you of anything by countdown, time of day or zone, as a whisper, a chat line or a raid"
-        .. " warning. Open the " .. SurfaceLink(ns.title) .. " window or type /rm to add your first reminder.")
+    ns.Print("Keeps reminders with a note or a checklist and alerts you by countdown, time of day or zone, as a"
+        .. " whisper or a chat line. Open the " .. SurfaceLink(ns.title) .. " window or type /rm to add your first reminder.")
 end
 
 -- /rm intro: the welcome line now, and the help tip again, at once in an open window.

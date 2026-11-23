@@ -6,7 +6,7 @@ local Reminders = {}
 ns.Reminders = Reminders
 
 -- Problems the window and /rm report in the same words.
-ns.NEED_TEXT = "Type the reminder text."
+ns.NEED_TITLE = "Type a title."
 ns.NEED_DURATION = "Type a countdown, such as 30m or 1h 30m."
 ns.NEED_CLOCK = "Type a time, such as 20:30 or 8:30 PM."
 ns.NEED_ZONE = "Type a zone, such as Stormwind City."
@@ -50,7 +50,8 @@ local function normalizeRep(r)
     return days
 end
 
--- Zone reminders have no due time, also after an edit turned a timed reminder into one.
+-- Zone reminders and those without a trigger have no due time, also after an edit turned a timed
+-- reminder into one.
 local function schedule(r, now)
     if r.kind == "timer" then
         r.due = now + r.seconds
@@ -81,8 +82,9 @@ local function dayNames(days)
 end
 
 -- The trigger as a phrase, such as "in 12 Min" or "every Monday and Friday at 20:00 realm time,
--- next in 2 Day".
+-- next in 2 Day", or nil without a trigger.
 function Reminders.Describe(r, now)
+    if r.kind == "none" then return nil end
     if r.kind == "zone" then
         return (r.rep and "every time you enter " or "when you enter ") .. r.zone
     end
@@ -100,30 +102,54 @@ function Reminders.Describe(r, now)
     return days .. Time.FormatClock(r.hour, r.minute) .. clock .. (r.rep and "next " or "") .. left
 end
 
--- The output and the trigger, the line under the text in the window: "Whisper, in 12 Min".
+-- The title, or the placeholder for a reminder still without one.
+function Reminders.Name(r)
+    return r.title ~= "" and r.title or ns.UNTITLED
+end
+
+-- The ticked and total items of a checklist.
+function Reminders.Progress(r)
+    local done = 0
+    for _, item in ipairs(r.items) do
+        if item.done then done = done + 1 end
+    end
+    return done, #r.items
+end
+
+-- The trigger and the checklist's progress, the line under the title in the window: "In 12 Min, 2 of
+-- 5 done". Empty for a note without a trigger.
 function Reminders.Detail(r, now)
-    return ns.OUTPUT_LABELS[r.output] .. ", " .. Reminders.Describe(r, now)
+    local parts = {}
+    local when = Reminders.Describe(r, now)
+    if when then parts[1] = when end
+    if r.body == "checklist" and #r.items > 0 then
+        parts[#parts + 1] = string.format("%d of %d done", Reminders.Progress(r))
+    end
+    local detail = table.concat(parts, ", ")
+    return detail:sub(1, 1):upper() .. detail:sub(2)
 end
 
 function Reminders.Summary(r, now)
-    return r.text .. " (" .. Reminders.Detail(r, now) .. ")"
+    local when = Reminders.Describe(r, now)
+    return Reminders.Name(r) .. (when and (" (" .. when .. ")") or "")
+end
+
+function Reminders.Find(id)
+    for _, r in ipairs(list()) do
+        if r.id == id then return r end
+    end
 end
 
 local function addToChat(frame, line, info)
     frame:AddMessage(line, info.r, info.g, info.b, info.id)
 end
 
--- A chat line's text with the snooze link after it, when the reminder fired for real.
-local function withLink(text, link)
-    return link and (text .. " " .. link) or text
-end
-
 -- A whisper from the addon itself, shown only on this client. A real whisper to yourself goes
 -- through SendChatMessage, which is restricted for addons on Forever (HasRestrictions) and prints a
 -- second "To" line. It lands in every open chat tab that shows whispers, with the whisper sound.
-local function whisper(text, link)
+local function whisper(text)
     local info = ChatTypeInfo.WHISPER
-    local line = CHAT_WHISPER_GET:format("[" .. ns.title .. "]") .. withLink(text, link)
+    local line = CHAT_WHISPER_GET:format("[" .. ns.title .. "]") .. text
     local shown = false
     FCF_IterateActiveChatWindows(function(frame)
         if frame:ContainsMessageGroup("WHISPER") then
@@ -137,39 +163,26 @@ local function whisper(text, link)
 end
 
 -- A system line in the main chat tab, as Blizzard's alarm clock prints its message.
-local function systemLine(text, link)
-    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.title .. "]: " .. withLink(text, link), ChatTypeInfo.SYSTEM)
+local function systemLine(text)
+    addToChat(DEFAULT_CHAT_FRAME, "[" .. ns.title .. "]: " .. text, ChatTypeInfo.SYSTEM)
 end
 
--- As Blizzard's alarm clock fires (TimeManager_FireAlarm): the chat line, then the text across
--- the screen centre in the raid warning frame. The icon codes and sound follow the frame's own
--- CHAT_MSG_RAID_WARNING handler, so {star} shows the raid marker.
-local function warning(text, link)
-    systemLine(text, link)
-    RaidWarningUtil.AddMessage(C_ChatInfo.ReplaceIconAndGroupExpressions(text), ChatTypeInfo.RAID_WARNING)
-    PlaySound(SOUNDKIT.RAID_WARNING)
-end
-
-local DELIVER = { whisper = whisper, print = systemLine, warning = warning }
+local DELIVER = { whisper = whisper, print = systemLine }
 
 -- The window previews an output with this, so the player sees and hears it before adding. A preview
--- has no snooze link.
+-- shows the bare title.
 function Reminders.Preview(output, text)
     DELIVER[output](text)
 end
 
--- Snooze links of this session by number, each spent by its first click. The link also carries the
--- session's start, so a link from before a /reload never snoozes a newer reminder with its number.
-local snoozes, session = {}, 0
-
--- An addon link (|Haddon:RemindMe:snooze:<session>:<n>|h), which Blizzard's chat hands to the
--- SetItemRef callback (ItemRefHandlersShared.lua), in the gold of Blizzard's own chat links such as
--- club invites (ItemRef.lua) and of the welcome line's link.
-local SNOOZE_PATTERN = "^" .. LinkTypes.AddOn .. ":" .. addonName .. ":snooze:(%d+):(%d+)$"
-local function snoozeLink(r)
-    snoozes[#snoozes + 1] = { text = r.text, output = r.output }
-    local label = "[Snooze " .. Time.FormatLeft(ns.SNOOZE) .. "]"
-    return NORMAL_FONT_COLOR:WrapTextInColorCode(LinkUtil.FormatLink(LinkTypes.AddOn, label, addonName, "snooze", session, #snoozes))
+-- The title as an addon link (|Haddon:RemindMe:open:<id>|h) that opens the reminder in the window.
+-- Blizzard's chat hands a click on it to the SetItemRef callback (ItemRefHandlersShared.lua). Gold
+-- is the colour of Blizzard's own chat links such as club invites (ItemRef.lua) and of the welcome
+-- line's link. Ids stay with a reminder, so a link from before a /reload still finds it.
+local OPEN_PATTERN = "^" .. LinkTypes.AddOn .. ":" .. addonName .. ":open:(%d+)$"
+local function openLink(r)
+    local label = "[" .. Reminders.Name(r) .. "]"
+    return NORMAL_FONT_COLOR:WrapTextInColorCode(LinkUtil.FormatLink(LinkTypes.AddOn, label, addonName, "open", r.id))
 end
 
 local function remove(r)
@@ -177,19 +190,38 @@ local function remove(r)
     inside[r.id] = nil
 end
 
--- Sends the reminder, then sets its next turn or removes it.
+-- Sends the title, then sets the next turn. A reminder that fires once stays in the list without a
+-- trigger, so its note or checklist is kept and its link still opens it.
 function Reminders.Fire(r, now)
-    DELIVER[r.output](r.text, snoozeLink(r))
-    if r.rep then schedule(r, now) else remove(r) end
-    ns.RefreshPanel()
+    DELIVER[r.output](openLink(r))
+    if r.rep then
+        schedule(r, now)
+    else
+        r.kind, r.rep, r.due = "none", false, nil
+        inside[r.id] = nil
+    end
+    ns.RefreshPanel(r)
+end
+
+-- An item is kept with its text, and an empty one is dropped.
+local function checkItems(items)
+    local kept = {}
+    for _, item in ipairs(items or {}) do
+        local text = ns.trim(item.text)
+        if text ~= "" then kept[#kept + 1] = { text = text, done = item.done == true } end
+    end
+    return kept
 end
 
 -- Checks a reminder from the window or /rm and fills in its defaults. The callers parse the
--- countdown and the time, so only the text and the zone are checked here. Returns the reminder,
--- or nil and the problem.
+-- countdown and the time, so only the zone is checked here. A title may still be empty while the
+-- window fills it in. Returns the reminder, or nil and the problem.
 local function check(r)
-    r.text = ns.trim(r.text)
-    if r.text == "" then return nil, ns.NEED_TEXT end
+    r.title = ns.trim(r.title)
+    r.note = r.note or ""
+    r.items = checkItems(r.items)
+    r.body = ns.BODY_LABELS[r.body] and r.body or "note"
+    r.kind = ns.KIND_LABELS[r.kind] and r.kind or "none"
     if r.kind == "zone" then
         r.zone = ns.trim(r.zone)
         if r.zone == "" then return nil, ns.NEED_ZONE end
@@ -208,7 +240,7 @@ function Reminders.Plan(spec, now)
 end
 
 -- Everything an edit may change. id and due stay with the stored reminder.
-local FIELDS = { "kind", "text", "output", "rep", "seconds", "hour", "minute", "realm", "zone" }
+local FIELDS = { "kind", "title", "body", "note", "items", "output", "rep", "seconds", "hour", "minute", "realm", "zone" }
 
 -- Rewrites a stored reminder in place, so it keeps its id and its place in the list. A countdown
 -- keeps running unless its length or trigger changed. A time of day is rescheduled from its new
@@ -288,24 +320,30 @@ local function checkZones(fire)
     end
 end
 
--- A click on a snooze link adds the reminder again as a one-time countdown, once per link. Every
--- addon's link arrives here, and another addon's may be secret, so it is checked first.
+-- A click on a reminder's title link opens it in the window. Every addon's link arrives here, and
+-- another addon's may be secret, so it is checked first.
 local function onLink(_, link)
     if not ns.CanAccess(link) or type(link) ~= "string" then return end
-    local linkSession, number = link:match(SNOOZE_PATTERN)
-    if not linkSession then return end
-    local entry = tonumber(linkSession) == session and snoozes[tonumber(number)] or nil
-    if not entry then
-        ns.Print("This snooze link ended with the last reload or logout.")
-        return
+    local id = link:match(OPEN_PATTERN)
+    if not id then return end
+    local r = Reminders.Find(tonumber(id))
+    if r then
+        ns.EditInPanel(r)
+    else
+        ns.Print("This reminder was deleted.")
     end
-    if entry.spent then
-        ns.Print("Already snoozed.")
-        return
-    end
-    entry.spent = true
-    local r = Reminders.Add({ kind = "timer", seconds = ns.SNOOZE, text = entry.text, output = entry.output })
-    ns.Print("Snoozed for " .. Time.FormatLeft(ns.SNOOZE) .. ": " .. r.text .. ".")
+end
+
+-- Reminders saved before titles had one text, which becomes the title. The raid warning output is
+-- gone, so its reminders whisper.
+local function migrate(r)
+    if r.text then r.title, r.text = r.text, nil end
+    r.title = r.title or ""
+    r.note = r.note or ""
+    r.items = r.items or {}
+    r.body = r.body or "note"
+    if not DELIVER[r.output] then r.output = ns.DEFAULT_OUTPUT end
+    r.rep = normalizeRep(r)
 end
 
 -- Catches up on what came due while logged out. A one-time reminder fires on the first tick. A
@@ -329,9 +367,8 @@ local ZONE_EVENTS = { "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_
 -- after the loading screen instead of under it. Logging in inside a reminder's zone counts as
 -- entering it.
 function Reminders.Start()
-    for _, r in ipairs(list()) do r.rep = normalizeRep(r) end
+    for _, r in ipairs(list()) do migrate(r) end
     catchUp()
-    session = GetServerTime()
     EventRegistry:RegisterCallback("SetItemRef", onLink, Reminders)
     local events = CreateFrame("Frame")
     local ticker

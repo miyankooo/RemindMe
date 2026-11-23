@@ -3,14 +3,18 @@ local _, ns = ...
 local Time = ns.Time
 local Reminders = ns.Reminders
 
--- Spacing roles on the 4 px grid: tight from label to control, gap between related controls, padding
--- inside a column. Rows, checkboxes and content buttons are 24 tall, a heading line 16.
-local TIGHT, GAP, PADDING = 4, 8, 16
-local ROW, HEADING = 24, 16
+-- Spacing roles on the 8 px grid: tight from text to its control, gap between related controls, padding
+-- inside a column, a section break between sections. Rows, checkboxes and content buttons are 24 tall.
+local TIGHT, GAP, PADDING, SECTION_GAP = 4, 8, 16, 24
+local ROW = 24
 
--- InputBoxTemplate draws its left cap 5 px outside the box (Shared/InputBox/InputBoxTemplates.xml:49),
--- so a box sits in by that much to line its art up with the column.
+-- InputBoxTemplate draws its left cap 5 px outside the box (Shared/InputBox/InputBoxTemplates.xml:49), and
+-- InputScrollFrameTemplate its border 5 px outside each side (:83-104), so a box sits in by that much to line
+-- its art up with the column.
 local INPUT_CAP = 5
+
+-- WowStyle1DropdownTemplate's art hangs 8 px past each side of its frame (Blizzard_Menu/Mainline/MenuTemplates.xml:9-10).
+local DROPDOWN_ART = 8
 
 -- The right margin a ScrollFrameTemplate leaves for its bar: SCROLL_FRAME_SCROLL_BAR_OFFSET_LEFT 6, the
 -- 8 px bar and a gap, rounded up to the grid.
@@ -47,7 +51,7 @@ local function HookTooltip(frame, fill, anchor)
     frame:HookScript("OnLeave", GameTooltip_Hide)
 end
 
--- Rounds a length derived from text up to the 4 px grid.
+-- Rounds a length derived from text up to the 4 px step text takes on the grid.
 local function Snap(length)
     return math.ceil(length / 4) * 4
 end
@@ -104,13 +108,40 @@ local function CreateHintBox(parent, hint, width)
     return box
 end
 
--- An inset's border on the stone without its marble tile, as the Auction House category list
--- (Blizzard_AuctionHouseCategoriesList.xml:60). For a status box in the button bar or a block on a settings page,
--- never on the brown panel.
-local function CreateInset(parent)
-    local inset = CreateFrame("Frame", nil, parent, "InsetFrameTemplate")
-    inset.Bg:Hide()
-    return inset
+-- InputScrollFrameTemplate, the Group Finder's listing description (Blizzard_GroupFinder/Mainline/LFGList.xml:1764):
+-- a bordered multi-line box with its own scroll bar and grey hint, here at a fixed width the caller passes and
+-- any height. Its OnLoad sized the box while it was still 0 wide, so the widths are set again
+-- (InputScrollFrame_OnLoad, InputBoxTemplates.lua:82). Typed text and the hint move to the 12 px roles, the hint
+-- keeping its grey, and the character count stays hidden as in the Group Finder.
+local function CreateNoteBox(parent, hint, width, maxLetters)
+    local scroll = CreateFrame("ScrollFrame", nil, parent, "InputScrollFrameTemplate")
+    scroll:SetWidth(width)
+    local box = scroll.EditBox
+    box:SetWidth(width - 18)
+    box:SetMaxLetters(maxLetters)
+    box:SetFontObject(GameFontHighlight)
+    local r, g, b = box.Instructions:GetTextColor()
+    box.Instructions:SetFontObject(GameFontDisable)
+    box.Instructions:SetTextColor(r, g, b)
+    box.Instructions:SetWidth(width)
+    InputScrollFrame_SetInstructions(scroll, hint)
+    scroll.CharCount:Hide()
+    return scroll
+end
+
+-- Blizzard's menu dropdown, filled with SetupMenu. Its frame sits on the column edge and its art hangs 8 px past each
+-- side, as the Group Finder lines it up under an edit box (LFGList.xml:1794-1795).
+local function CreateDropdown(parent, width)
+    local dropdown = CreateFrame("DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+    dropdown:SetWidth(width or 160)
+    return dropdown
+end
+
+-- The close button Blizzard uses for one row of a list, sized to the row.
+local function CreateRemoveButton(parent)
+    local button = CreateFrame("Button", nil, parent, "UIPanelCloseButtonNoScripts")
+    button:SetSize(24, 24)
+    return button
 end
 
 -- The gold Settings divider stood on end, to split the brown panel into columns. SetClampedTextureRotation turns it
@@ -143,40 +174,78 @@ local function CreateSection(parent, title)
     return section
 end
 
--- A ScrollFrameTemplate with its scroll child. Leave the 24 px gutter free on its right for the bar.
-local function CreateScroll(parent, name)
-    local scroll = CreateFrame("ScrollFrame", name, parent, "ScrollFrameTemplate")
+-- A ScrollFrameTemplate with its scroll child. Leave the 24 px gutter free on its right for the bar, which hides
+-- while everything fits.
+local function CreateScroll(parent)
+    local scroll = CreateFrame("ScrollFrame", nil, parent, "ScrollFrameTemplate")
+    scroll.ScrollBar:SetHideIfUnscrollable(true)
     scroll.content = CreateFrame("Frame", nil, scroll)
     scroll.content:SetSize(1, 1)
     scroll:SetScrollChild(scroll.content)
     return scroll
 end
 
--- A selectable row in a list on the brown panel, from the pet journal (Blizzard_Collections): the dark tile, the gold
--- selection outline and the hover glow, stretched to the row. A name in heading over one muted detail line, both cut
--- rather than wrapped. Rows are 44 tall, 4 apart, text 12 in from the sides and 8 from the top.
-local LIST_ROW, LIST_PITCH, LIST_INSET, LIST_TOP = 44, 48, 12, 8
-local function CreateListRow(parent, index)
+-- Scrolls just enough to show the band from top to bottom of the scroll child.
+local function Reveal(scroll, top, bottom)
+    scroll:UpdateScrollChildRect()
+    local offset, view = scroll:GetVerticalScroll(), scroll:GetHeight()
+    if bottom > offset + view then
+        scroll:SetVerticalScroll(math.min(bottom - view, scroll:GetVerticalScrollRange()))
+    elseif top < offset then
+        scroll:SetVerticalScroll(top)
+    end
+end
+
+-- The list rows of the character window's Statistics tab (Blizzard_Statistics/Camelot/StatisticsFrame.xml,
+-- StatisticsEntryTemplate): LIST_GAP apart, the text LIST_INDENT in from the row's edge, and Blizzard's rounded line
+-- from character creation's dropdowns behind it, white at 0.10 alpha on hover (StatisticsEntryMixin) and 0.20 while
+-- selected (SkillsEntryMixin). The title wraps so it shows in full, with the trigger and the checklist's progress in
+-- one muted line under it, so a row grows with its text; a one-line row is the template's 24, its text ROW_PAD from
+-- the top and bottom. Built from the atlases, since the template reads the player's statistics.
+local LIST_GAP, LIST_INDENT, ROW_PAD = 3, 2, 6
+local function CreateListRow(parent, textWidth)
     local row = CreateFrame("Button", nil, parent)
-    row:SetHeight(LIST_ROW)
-    row:SetPoint("TOPLEFT", 0, -(index - 1) * LIST_PITCH)
-    row:SetPoint("TOPRIGHT", 0, -(index - 1) * LIST_PITCH)
-    local tile = row:CreateTexture(nil, "BACKGROUND")
-    tile:SetAtlas("PetList-ButtonBackground")
-    tile:SetAllPoints()
-    row.selected = row:CreateTexture(nil, "OVERLAY")
-    row.selected:SetAtlas("PetList-ButtonSelect")
-    row.selected:SetAllPoints()
-    row.selected:Hide()
-    row:SetHighlightAtlas("PetList-ButtonHighlight")
-    row.name = CreateText(row, GameFontNormal)
-    row.name:SetPoint("TOPLEFT", LIST_INSET, -LIST_TOP)
-    row.name:SetPoint("TOPRIGHT", -LIST_INSET, -LIST_TOP)
-    row.name:SetWordWrap(false)
-    row.detail = CreateText(row, GameFontDisable)
-    row.detail:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -4)
-    row.detail:SetPoint("TOPRIGHT", row.name, "BOTTOMRIGHT", 0, -4)
+    row.highlight = CreateFrame("Frame", nil, row)
+    row.highlight:SetAllPoints()
+    row.highlight:SetAlpha(0)
+    local left = row.highlight:CreateTexture(nil, "BACKGROUND")
+    left:SetAtlas("charactercreate-customize-dropdown-linemouseover-side")
+    left:SetWidth(6)
+    left:SetPoint("TOPLEFT")
+    left:SetPoint("BOTTOMLEFT")
+    local right = row.highlight:CreateTexture(nil, "BACKGROUND")
+    right:SetAtlas("charactercreate-customize-dropdown-linemouseover-side")
+    right:SetTexCoord(1, 0, 0, 1)
+    right:SetWidth(6)
+    right:SetPoint("TOPRIGHT")
+    right:SetPoint("BOTTOMRIGHT")
+    local middle = row.highlight:CreateTexture(nil, "BACKGROUND")
+    middle:SetAtlas("charactercreate-customize-dropdown-linemouseover-middle")
+    middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
+    middle:SetPoint("BOTTOMRIGHT", right, "BOTTOMLEFT")
+    row.name = CreateText(row, GameFontHighlight, "OVERLAY")
+    row.name:SetPoint("TOPLEFT", LIST_INDENT, -ROW_PAD)
+    row.name:SetWidth(textWidth)
+    row.name:SetWordWrap(true)
+    row.detail = CreateText(row, GameFontDisable, "OVERLAY")
+    row.detail:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -TIGHT)
+    row.detail:SetWidth(textWidth)
     row.detail:SetWordWrap(false)
+    local function refresh(self)
+        self.highlight:SetAlpha((self.isSelected and 0.20) or (self.hovered and 0.10) or 0)
+    end
+    row:SetScript("OnEnter", function(self)
+        self.hovered = true
+        refresh(self)
+    end)
+    row:SetScript("OnLeave", function(self)
+        self.hovered = false
+        refresh(self)
+    end)
+    function row:SetSelected(selected)
+        self.isSelected = selected
+        refresh(self)
+    end
     return row
 end
 
@@ -186,7 +255,7 @@ local function CreateEmptyState(parent, text)
     empty:SetPoint("LEFT", 16, 0)
     empty:SetPoint("RIGHT", -16, 0)
     empty:SetJustifyH("CENTER")
-    empty:SetText(text)
+    empty:SetText(text or "")
     return empty
 end
 
@@ -308,6 +377,17 @@ local function AddBarButton(window, label, onClick, width)
     return button
 end
 
+-- A destructive bar button, such as Delete, takes the bottom-left corner, as the macro window places its Delete.
+local function AddBarButtonLeft(window, label, onClick, width)
+    local button = CreateFrame("Button", nil, window, "MagicButtonTemplate")
+    button:SetWidth(width or 128)
+    button:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT")
+    MagicButton_OnLoad(button)
+    button:SetText(label)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+
 -- A help line in the attic, from title left 58 to the rows' right edge, cut rather than wrapped. Two lines sit one
 -- gap either side of the attic's middle: a gold how-to over a white next step.
 local function CreateAtticLine(frame, fontObject, y, rightOffset)
@@ -330,7 +410,7 @@ end
 -- A dialog in Blizzard's dialog chrome: DialogBorderTemplate, DialogHeaderTemplate with the title and
 -- UIPanelCloseButton 2 px in from the corner (Blizzard_Channels/Mainline/CreateChannelPopup.xml:72). Width is a
 -- multiple of 8 from 400 to 480. Add content top to bottom with AddText and AddField, then call Fit.
-local DIALOG_SIDE, DIALOG_TOP, SECTION_GAP = 20, 40, 24
+local DIALOG_SIDE, DIALOG_TOP = 24, 40
 local function CreateDialog(name, title, width, parent, position)
     local dialog = CreateFrame("Frame", name, parent or UIParent)
     dialog:SetSize(width, DIALOG_TOP + DIALOG_SIDE)
@@ -346,7 +426,7 @@ local function CreateDialog(name, title, width, parent, position)
     dialog.CloseButton:SetScript("OnClick", function() dialog:Hide() end)
 
     -- Places a widget the caller sized in the content column below everything added so far; indent covers native
-    -- art, 5 for an edit box, 8 for a dropdown. The gap defaults to 8; AddText passes a section break.
+    -- art, 5 for an edit box. The gap defaults to 8; AddText passes a section break.
     function dialog:AddField(region, height, gap, indent)
         if self.hasContent then self.contentHeight = self.contentHeight + (gap or 8) end
         self.hasContent = true
@@ -381,7 +461,7 @@ local function CreateDialog(name, title, width, parent, position)
         return button
     end
 
-    -- 40 top, the content, a section break and the button row if there are buttons, 20 bottom, on the grid.
+    -- 40 top, the content, a section break and the button row if there are buttons, 24 bottom, on the grid.
     function dialog:Fit()
         local height = DIALOG_TOP + self.contentHeight + DIALOG_SIDE
         if #self.buttons > 0 then height = height + SECTION_GAP + 24 end
@@ -392,62 +472,71 @@ local function CreateDialog(name, title, width, parent, position)
     return dialog
 end
 
--- Laid out like Blizzard's macro window (Blizzard_MacroUI.xml): a list to pick from, an editor for
--- the picked entry, Delete in the bar's bottom-left corner and New beside the primary button. Two
--- equal columns: the reminders on the left, the editor on the right. The outer width carries
--- Blizzard's 4/-6 inset offsets, so it is 674.
+-- Laid out like Blizzard's macro window (Blizzard_MacroUI.xml): the reminders on the left, the picked one in
+-- full on the right, Delete in the bar's bottom-left corner and New Reminder in its bottom-right. Two equal
+-- columns; the outer width carries Blizzard's 4/-6 inset offsets, so it is 674.
 local COLUMN_W = 328
 local PANEL_W = PANEL_INSET_LEFT_OFFSET + 2 * COLUMN_W + GAP - PANEL_INSET_RIGHT_OFFSET
 
--- The editor's inner width, and the half a short value box takes so a checkbox fits beside it.
+-- The detail's inner width, and the list's width left of its scroll gutter.
 local BODY_W = COLUMN_W - 2 * PADDING
-local HALF_W = (BODY_W - GAP) / 2
+local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
 
--- Rows stacked a tight gap apart: the weekdays in three columns and the outputs.
-local function stackHeight(rows)
-    return rows * ROW + (rows - 1) * TIGHT
-end
+-- The detail from the top: the title, the Note and Checklist radios, then the note or the checklist down to When.
+local CONTENT_TOP = 2 * (ROW + GAP)
+
+-- The When dropdown takes the width of a bar button; the value box fills the rest of its row.
+local KIND_W = 128
+
+-- Checklist rows sit 24 tall at the editable list's pitch of 32.
+local ITEM_PITCH = ROW + GAP
+
+-- Weekdays in three columns, rows stacked a tight gap apart.
 local DAY_COLUMNS = 3
 local DAY_W = 4 * math.floor((BODY_W + GAP) / DAY_COLUMNS / 4)
-local DAYS_H = stackHeight(math.ceil(#ns.WEEK_ORDER / DAY_COLUMNS))
-local OUTPUTS_H = stackHeight(#ns.OUTPUTS)
+local DAY_ROWS = math.ceil(#ns.WEEK_ORDER / DAY_COLUMNS)
+local DAYS_H = DAY_ROWS * ROW + (DAY_ROWS - 1) * TIGHT
 
--- The preview line under When has room for two lines.
-local PREVIEW_H = 2 * HEADING
+-- The preview line under the trigger has room for two lines.
+local PREVIEW_H = 32
 
--- The editor's longest layout, Time of Day: padding, three section heads, two section breaks, the
--- message box, the When body (trigger, time, weekdays and preview) and the outputs.
-local WHEN_CLOCK_H = 2 * (ROW + GAP) + DAYS_H + GAP + PREVIEW_H
-local EDITOR_H = 2 * PADDING + 3 * SECTION_BODY_TOP + 2 * SECTION_GAP + ROW + WHEN_CLOCK_H + OUTPUTS_H
+-- When at its tallest, a time of day: the dropdown, Use Local Time, the weekdays, the preview and the outputs.
+local WHEN_CLOCK_H = ROW + GAP + ROW + GAP + DAYS_H + GAP + PREVIEW_H + GAP + ROW
+
+-- The note or checklist keeps at least five checklist rows beside the tallest When.
+local CONTENT_MIN = 5 * ITEM_PITCH
+
+local EDITOR_H = CONTENT_TOP + CONTENT_MIN + SECTION_GAP + SECTION_BODY_TOP + WHEN_CLOCK_H
 
 -- The template's attic keeps the columns below the portrait, which hangs 55px down from the top edge
 -- (Mainline/SharedUIPanelTemplates.xml:584). The attic and button bar offsets (60 and 26) are off
--- the grid, so the height snaps up and the extra px fall into the columns' bottom padding.
-local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + EDITOR_H + PANEL_INSET_BOTTOM_BUTTON_OFFSET)
+-- the grid, so the height snaps up and the extra px fall to the note or checklist.
+local PANEL_H = Snap(-PANEL_INSET_ATTIC_OFFSET + 2 * PADDING + EDITOR_H + PANEL_INSET_BOTTOM_BUTTON_OFFSET)
 
-local LIST_W = COLUMN_W - PADDING - SCROLL_GUTTER
+local DIALOG_W = 400
 
 -- The window's player-facing text, kept in one table: as separate locals the panel builder would pass Lua 5.1's
 -- limit of 60 upvalues per function, and the client refuses to load the file.
 local TEXT = {
-    -- The empty list says how to fill it, centred in the left column.
-    EMPTY_TEXT = "No reminders yet. Add one on the right.",
+    ATTIC = "Changes save as you type. Click a reminder's title in chat to open it here.",
+    EMPTY_LIST = "No reminders yet.",
+    EMPTY_FIRST = "Click New Reminder to add your first reminder.",
+    EMPTY_PICK = "Pick a reminder on the left, or click New Reminder.",
 
-    -- The help tip stands right of the primary button, outside the window, until the first reminder is added.
-    TIP_TEXT = "Type a message and when it fires, then click Add Reminder to set it.",
+    -- The help tip stands right of New Reminder, outside the window, until the first reminder is added.
+    TIP_TEXT = "Click New Reminder to add a reminder with a note or a checklist.",
 
-    -- The attic line names the mode and the next step.
-    HELP_NEW = "Fill in a new reminder, or click one on the left to change it.",
-    HELP_EDIT = "Changes save with Save, or when you pick another reminder or close the window.",
-
-    ADD_LABEL = "Add Reminder",
     NEW_LABEL = "New Reminder",
+    TITLE_HINT = "Title",
+    NOTE_HINT = "Add a note",
+    ADD_ITEM = "Add an item",
 
     -- What the empty value field asks for under each trigger.
     VALUE_HINTS = { timer = "30m or 1h 30m", clock = "20:30 or 8:30 PM", zone = "Stormwind City" },
 
     -- The preview line while the value field is empty: what the trigger does.
     PREVIEW_HINTS = {
+        none = "Never fires. It stays on your list until you delete it.",
         timer = "Fires once the countdown runs out.",
         clock = "Fires once, or on every weekday you tick.",
         zone = "Fires when you enter this zone or an area in it.",
@@ -455,40 +544,38 @@ local TEXT = {
 
     -- Tooltips for the choices, so each says what it does before it is picked.
     KIND_TIPS = {
+        none = "Keeps it as a note or a list that never fires.",
         timer = "Fires once a countdown runs out, such as 30m or 1h 30m.",
         clock = "Fires at a time of day, once or on the weekdays you tick.",
         zone = "Fires when you enter a zone or an area in it, such as Stormwind or Trade District.",
     },
+    BODY_TIPS = {
+        note = "Free text under the title, up to 255 characters.",
+        checklist = "Items under the title that you tick off one by one.",
+    },
     OUTPUT_TIPS = {
         whisper = "A pink whisper line in chat with the whisper sound. Only you see it.",
         print = "A yellow line in your main chat tab, without a sound.",
-        warning = "Large text across the middle of the screen with the raid warning sound, and a chat line. Only you see it.",
     },
+    TITLE_TIP = "What the reminder is about. Its alert in chat shows the title as a link that opens it here.",
+    WHEN_TIP = "What makes the reminder fire. With None it never fires.",
     TIMER_REPEAT_TIP = "Starts the countdown again each time it fires.",
     ZONE_REPEAT_TIP = "Fires on every entry, not only the next one.",
     LOCAL_TIME_TIP = "Use your computer's clock instead of the realm clock.",
     DAY_TIP = "Fires on this day every week. With no day ticked, it fires once.",
-    MESSAGE_TIP = "What the reminder says when it fires.",
     VALUE_TIPS = {
         timer = "How long until it fires, such as 90s, 30m or 1h 30m.",
         clock = "The time it fires, such as 20:30 or 8:30 PM.",
         zone = "The zone or an area in it, such as Stormwind City or Trade District.",
     },
-    INCOMPLETE_TIP = "Type a message and when it fires first.",
 }
 
-local DIALOG_W = 400
-
--- The picks a new reminder starts from. The clock follows the player's minimap clock setting.
--- rep is the Repeat or Every Time tick, days the ticked weekdays of a time of day.
-local function newPicks()
-    return { kind = "timer", output = ns.DEFAULT_OUTPUT, realm = ns.DefaultRealm(), rep = false, days = {} }
-end
-
--- The picks of a stored reminder. Every day ticks all seven weekdays.
+-- The picks of a stored reminder. Every day ticks all seven weekdays, and the items are copies, so typing
+-- never writes to the stored list before a save.
 local function picksOf(r)
-    local picks = newPicks()
-    picks.kind, picks.output = r.kind, r.output
+    local picks = {
+        kind = r.kind, output = r.output, body = r.body, realm = ns.DefaultRealm(), rep = false, days = {}, items = {},
+    }
     if r.kind == "clock" then
         picks.realm = r.realm
         for _, wday in ipairs(ns.WEEK_ORDER) do
@@ -497,7 +584,26 @@ local function picksOf(r)
     else
         picks.rep = r.rep == true
     end
+    for i, item in ipairs(r.items) do picks.items[i] = { text = item.text, done = item.done } end
     return picks
+end
+
+-- What the value field shows for a stored trigger.
+local function valueOf(r)
+    if r.kind == "timer" then return Time.FormatDuration(r.seconds) end
+    if r.kind == "clock" then return Time.FormatClockField(r.hour, r.minute) end
+    if r.kind == "zone" then return r.zone end
+    return ""
+end
+
+-- A stored trigger as a spec, for a save while the trigger field is still unfinished.
+local function triggerOf(r)
+    return { kind = r.kind, rep = r.rep, seconds = r.seconds, hour = r.hour, minute = r.minute, realm = r.realm, zone = r.zone }
+end
+
+-- A reminder New Reminder made and the player left without a word in it.
+local function isEmpty(r)
+    return r.title == "" and ns.trim(r.note) == "" and #r.items == 0 and r.kind == "none"
 end
 
 local panel
@@ -520,10 +626,9 @@ end
 
 -- A bar button explains why it is off, as Blizzard's dungeon finder does, so it takes the mouse while
 -- disabled too.
-local function hookBarTip(button, fill)
+local function hookBarTip(button, title, text, whyOff)
     button:SetMotionScriptsWhileDisabled(true)
     HookTooltip(button, function(tooltip, self)
-        local title, text, whyOff = fill()
         GameTooltip_SetTitle(tooltip, title)
         GameTooltip_AddNormalLine(tooltip, text, true)
         if not self:IsEnabled() then GameTooltip_AddErrorLine(tooltip, whyOff, true) end
@@ -544,12 +649,7 @@ local function createCheck(parent, label, tip)
     return check
 end
 
--- A section's height follows its body.
-local function setBodyHeight(section, height)
-    section:SetHeight(SECTION_BODY_TOP + height)
-end
-
--- A slot spans a section body at a top offset and holds one line of controls.
+-- A slot spans the When body at a top offset and holds one line of controls.
 local function createSlot(body, height)
     local slot = CreateFrame("Frame", nil, body)
     slot:SetHeight(height)
@@ -562,15 +662,20 @@ local function placeSlot(slot, body, top)
     slot:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
 end
 
--- The left column's scroll area: one padding in from the top, left and bottom, the scroll bar's
--- gutter free on the right. The bar hides while every row fits.
-local function createListScroll(column)
-    local scroll = CreateScroll(column)
-    scroll.ScrollBar:SetHideIfUnscrollable(true)
-    scroll:SetPoint("TOPLEFT", PADDING, -PADDING)
-    scroll:SetPoint("BOTTOMRIGHT", -SCROLL_GUTTER, PADDING)
-    scroll.content:SetWidth(LIST_W)
-    return scroll
+-- Radios in a row, each a padding step after the label before it.
+local function createRadioRow(slot, keys, labels, tips)
+    local radios, previous = {}, nil
+    for _, key in ipairs(keys) do
+        local radio = createRadio(slot, labels[key], tips[key])
+        if previous then
+            radio:SetPoint("LEFT", previous.label, "RIGHT", PADDING + RADIO_INSET, 0)
+        else
+            radio:SetPoint("LEFT", slot, "LEFT", RADIO_INSET, 0)
+        end
+        radios[key] = radio
+        previous = radio
+    end
+    return radios
 end
 
 -- The template's Inset becomes the left column and a plain frame the right one, one gap apart on
@@ -594,34 +699,22 @@ local function createColumns(frame)
     return left, right
 end
 
--- One line in the attic, the band between the title bar and the columns, centred on the band's height.
+-- One help line in the attic, the band between the title bar and the columns, centred on its height.
 local function createAtticHelp(frame)
     local atticMiddle = (PANEL_INSET_TOP_OFFSET + PANEL_INSET_ATTIC_OFFSET) / 2
-    return CreateAtticLine(frame, GameFontHighlight, atticMiddle, PANEL_INSET_RIGHT_OFFSET - PADDING)
+    local line = CreateAtticLine(frame, GameFontHighlight, atticMiddle, PANEL_INSET_RIGHT_OFFSET - PADDING)
+    line:SetText(TEXT.ATTIC)
+    return line
 end
 
--- Delete takes the bar's bottom-left corner, as MacroDeleteButton does. MagicButton_OnLoad runs
--- after the zero-offset anchor so Blizzard applies its corner inset, as AddBarButton does.
-local function createDeleteButton(frame)
-    local button = CreateFrame("Button", nil, frame, "MagicButtonTemplate")
-    button:SetWidth(128)
-    button:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT")
-    MagicButton_OnLoad(button)
-    button:SetText(DELETE)
-    return button
-end
-
--- The status sits in an inset that fills the button bar between Delete and New Reminder.
-local function createStatus(frame, leftButton, rightButton)
-    local box = CreateInset(frame)
-    box:SetPoint("BOTTOMLEFT", leftButton, "BOTTOMRIGHT", GAP, 0)
-    box:SetPoint("TOPRIGHT", rightButton, "TOPLEFT", -GAP, 0)
-
-    local status = CreateText(box, GameFontHighlight)
-    status:SetPoint("LEFT", GAP, 0)
-    status:SetPoint("RIGHT", -GAP, 0)
-    status:SetWordWrap(false)
-    return status
+-- The list's scroll area: one padding in from the top, left and bottom, the scroll bar's gutter free on
+-- the right.
+local function createListScroll(column)
+    local scroll = CreateScroll(column)
+    scroll:SetPoint("TOPLEFT", PADDING, -PADDING)
+    scroll:SetPoint("BOTTOMRIGHT", -SCROLL_GUTTER, PADDING)
+    scroll.content:SetWidth(LIST_W)
+    return scroll
 end
 
 -- Delete asks first, as the macro window's Delete does (CONFIRM_DELETE_SELECTED_MACRO), and names the
@@ -634,25 +727,9 @@ local function createDeleteDialog()
     dialog.cancelButton = dialog:AddButton(CANCEL, function() dialog:Hide() end)
     dialog.deleteButton = dialog:AddButton(DELETE, nil)
     hookTip(dialog.cancelButton, CANCEL, "Keeps the reminder.")
-    hookTip(dialog.deleteButton, DELETE, "Removes the reminder for good.")
+    hookTip(dialog.deleteButton, DELETE, "Removes the reminder with its note or checklist for good.")
     dialog:Fit()
     return dialog
-end
-
--- The full text and trigger, for rows whose text the row cuts off.
-local function fillRowTooltip(tooltip, row)
-    GameTooltip_SetTitle(tooltip, row.reminder.text, nil, true)
-    GameTooltip_AddNormalLine(tooltip, Reminders.Detail(row.reminder, GetServerTime()), true)
-    GameTooltip_AddInstructionLine(tooltip, "Click to edit this reminder.")
-end
-
--- A reminder's row at its place in the list: its text over its trigger line. A click loads it into
--- the editor.
-local function createRow(parent, index, onClick)
-    local row = CreateListRow(parent, index)
-    row:SetScript("OnClick", function() onClick(row.reminder) end)
-    AttachTooltip(row, fillRowTooltip)
-    return row
 end
 
 -- The trigger in words: when a countdown or time of day fires next, or which entry a zone waits for.
@@ -680,184 +757,188 @@ local function describeNext(spec)
     return line .. ", in " .. left .. "."
 end
 
-local function buildPanel()
-    local frame = CreateWindow("RemindMeFrame", ns.title, ns.ICON, PANEL_W, PANEL_H, RemindMeDB.window)
-    local left, right = createColumns(frame)
-    local help = createAtticHelp(frame)
-    frame.help = help
+-- A checklist line in the editable list's layout: the checkbox on the left, the item a gap after it in a hint
+-- box indented for its cap, the remove button on the right edge. The last row adds an item and shows only its
+-- hint until typed in.
+local function createItemRow(parent, index)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(ROW)
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * ITEM_PITCH)
+    row:SetPoint("TOPRIGHT", 0, -(index - 1) * ITEM_PITCH)
+    row.index = index
+    row.check = createCheck(row, "", "Ticks the item off. It stays in the list.")
+    row.check:SetPoint("LEFT")
+    row.remove = CreateRemoveButton(row)
+    row.remove:SetPoint("RIGHT")
+    attachTip(row.remove, REMOVE, "Removes this item.")
+    row.box = CreateHintBox(row, "")
+    row.box:SetMaxLetters(ns.MAX_LETTERS)
+    row.box:SetPoint("LEFT", row.check, "RIGHT", GAP + INPUT_CAP, 0)
+    row.box:SetPoint("RIGHT", row.remove, "LEFT", -(GAP + INPUT_CAP), 0)
+    return row
+end
 
-    -- selected is the stored reminder the editor shows, nil while it shows a new one. The form
-    -- holds the picks either way.
-    local form = newPicks()
-    local selected
+-- An item row shows its tick and remove button, the add row its hint. A ticked item's text turns grey.
+local function styleItem(row, item)
+    row.check:SetShown(item ~= nil)
+    row.remove:SetShown(item ~= nil)
+    row.check:SetChecked(item ~= nil and item.done)
+    row.box.Instructions:SetText(item and "" or TEXT.ADD_ITEM)
+    row.box:SetTextColor((item and item.done and GRAY_FONT_COLOR or HIGHLIGHT_FONT_COLOR):GetRGB())
+end
 
-    -- A line in the status box until the player changes a field: Added or Saved.
-    local notice, noticeColor
+-- When, held to the detail's bottom: the trigger dropdown with its value, the trigger's own options, the weekdays
+-- of a time of day, the preview line and the outputs.
+local function createWhen(editor)
+    local when = CreateSection(editor, "When")
+    when:SetPoint("BOTTOMLEFT")
+    when:SetPoint("BOTTOMRIGHT")
+    local body = when.body
 
-    -- Reminders list.
-    local scroll = createListScroll(left)
-    local listSection = CreateSection(scroll.content, "Reminders")
-    listSection:SetPoint("TOPLEFT")
-    listSection:SetPoint("TOPRIGHT")
+    when.kindDropdown = CreateDropdown(body, KIND_W)
+    when.kindDropdown:SetPoint("LEFT", body, "TOPLEFT", 0, -ROW / 2)
+    hookTip(when.kindDropdown, "When", TEXT.WHEN_TIP)
+    when.valueBox = CreateHintBox(body, "")
+    when.valueBox:SetMaxLetters(ns.MAX_LETTERS)
+    when.valueBox:SetPoint("LEFT", when.kindDropdown, "RIGHT", DROPDOWN_ART + GAP + INPUT_CAP, 0)
+    when.valueBox:SetPoint("RIGHT", body, "TOPRIGHT", -INPUT_CAP, -ROW / 2)
 
-    local empty = CreateEmptyState(left, TEXT.EMPTY_TEXT)
-
-    -- Rows by list place, made on first need and hidden past the end of the list.
-    local rows, shownRows = {}, 0
-
-    -- Message section.
-    local messageSection = CreateSection(right, "Message")
-    messageSection:SetPoint("TOPLEFT", PADDING, -PADDING)
-    messageSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
-    local textSlot = createSlot(messageSection.body, ROW)
-    placeSlot(textSlot, messageSection.body, 0)
-    setBodyHeight(messageSection, ROW)
-
-    -- The box sits in by the template's left cap, so its visible border lines up with the column.
-    local textBox = CreateHintBox(textSlot, "What should it remind you of?")
-    textBox:SetMaxLetters(255)
-    textBox:SetPoint("LEFT", INPUT_CAP, 0)
-    textBox:SetPoint("RIGHT")
-    hookTip(textBox, "Message", TEXT.MESSAGE_TIP)
-
-    -- When section, one section break below Message: the trigger radios, the value with what goes
-    -- beside it, the weekdays of a time of day or the Every Time tick of a zone, and the preview line.
-    local whenSection = CreateSection(right, "When")
-    whenSection:SetPoint("TOPLEFT", messageSection, "BOTTOMLEFT", 0, -SECTION_GAP)
-    whenSection:SetPoint("TOPRIGHT", messageSection, "BOTTOMRIGHT", 0, -SECTION_GAP)
-    local whenBody = whenSection.body
-    local kindSlot = createSlot(whenBody, ROW)
-    local valueSlot = createSlot(whenBody, ROW)
-    local daysSlot = createSlot(whenBody, DAYS_H)
-    local zoneSlot = createSlot(whenBody, ROW)
-
-    local kindRadios, previous = {}, nil
-    for _, kind in ipairs(ns.KINDS) do
-        local radio = createRadio(kindSlot, ns.KIND_LABELS[kind], TEXT.KIND_TIPS[kind])
-        if previous then
-            radio:SetPoint("LEFT", previous.label, "RIGHT", PADDING + RADIO_INSET, 0)
-        else
-            radio:SetPoint("LEFT", kindSlot, "LEFT", RADIO_INSET, 0)
-        end
-        kindRadios[kind] = radio
-        previous = radio
-    end
-
-    local valueBox = CreateHintBox(valueSlot, TEXT.VALUE_HINTS[form.kind])
-    valueBox:SetMaxLetters(255)
-    HookTooltip(valueBox, function(tooltip)
-        GameTooltip_SetTitle(tooltip, ns.KIND_LABELS[form.kind])
-        GameTooltip_AddNormalLine(tooltip, TEXT.VALUE_TIPS[form.kind], true)
-    end)
-    local hereButton = CreateButton(valueSlot, "Current Zone")
-    hereButton:SetPoint("RIGHT")
-    hookTip(hereButton, "Current Zone", "Fills in the zone you are in.")
-    local timerRepeat = createCheck(valueSlot, "Repeat", TEXT.TIMER_REPEAT_TIP)
-    timerRepeat:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
-    local localCheck = createCheck(valueSlot, TIMEMANAGER_LOCALTIME, TEXT.LOCAL_TIME_TIP)
-    localCheck:SetPoint("LEFT", valueSlot, "LEFT", HALF_W + GAP, 0)
+    local optionSlot = createSlot(body, ROW)
+    when.timerRepeat = createCheck(optionSlot, "Repeat", TEXT.TIMER_REPEAT_TIP)
+    when.timerRepeat:SetPoint("LEFT")
+    when.localCheck = createCheck(optionSlot, TIMEMANAGER_LOCALTIME, TEXT.LOCAL_TIME_TIP)
+    when.localCheck:SetPoint("LEFT")
+    when.zoneRepeat = createCheck(optionSlot, "Every Time", TEXT.ZONE_REPEAT_TIP)
+    when.zoneRepeat:SetPoint("LEFT")
+    when.hereButton = CreateButton(optionSlot, "Current Zone")
+    when.hereButton:SetPoint("RIGHT")
+    hookTip(when.hereButton, "Current Zone", "Fills in the zone you are in.")
 
     -- Weekdays from Monday, three to a row.
-    local dayChecks = {}
+    local daysSlot = createSlot(body, DAYS_H)
+    when.dayChecks = {}
     for i, wday in ipairs(ns.WEEK_ORDER) do
         local check = createCheck(daysSlot, CALENDAR_WEEKDAY_NAMES[wday], TEXT.DAY_TIP)
         local column, line = (i - 1) % DAY_COLUMNS, math.floor((i - 1) / DAY_COLUMNS)
         check:SetPoint("TOPLEFT", daysSlot, "TOPLEFT", column * DAY_W, -line * (ROW + TIGHT))
-        dayChecks[wday] = check
+        when.dayChecks[wday] = check
     end
 
-    local zoneRepeat = createCheck(zoneSlot, "Every Time", TEXT.ZONE_REPEAT_TIP)
-    zoneRepeat:SetPoint("LEFT")
+    when.preview = CreateText(body, GameFontHighlight)
+    when.preview:SetHeight(PREVIEW_H)
+    when.preview:SetJustifyV("TOP")
+    when.preview:SetWordWrap(true)
 
-    local preview = CreateText(whenBody, GameFontHighlight)
-    preview:SetHeight(PREVIEW_H)
-    preview:SetJustifyV("TOP")
-    preview:SetWordWrap(true)
+    local sendSlot = createSlot(body, ROW)
+    when.outputRadios = createRadioRow(sendSlot, ns.OUTPUTS, ns.OUTPUT_LABELS, TEXT.OUTPUT_TIPS)
+    when.testButton = CreateButton(sendSlot, "Test")
+    when.testButton:SetPoint("RIGHT")
+    hookTip(when.testButton, "Test", "Shows the alert once now, the way it arrives.")
 
-    -- Send As section, held to the column's bottom so it never moves when the trigger changes. The
-    -- outputs stack, as long names such as the German raid warning need the width.
-    local outputSection = CreateSection(right, "Send As")
-    outputSection:SetPoint("BOTTOMLEFT", PADDING, PADDING)
-    outputSection:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
-    setBodyHeight(outputSection, OUTPUTS_H)
-    local outputRadios = {}
-    for i, output in ipairs(ns.OUTPUTS) do
-        local radio = createRadio(outputSection.body, ns.OUTPUT_LABELS[output], TEXT.OUTPUT_TIPS[output])
-        local middle = (i - 1) * (ROW + TIGHT) + ROW / 2
-        radio:SetPoint("LEFT", outputSection.body, "TOPLEFT", RADIO_INSET, -middle)
-        outputRadios[output] = radio
-    end
-    local testButton = CreateButton(outputSection.body, "Test")
-    testButton:SetPoint("TOPRIGHT")
-    hookTip(testButton, "Test", "Shows the message once now, the way it arrives.")
-
-    -- The primary button takes the bar's bottom-right corner and reads Save while editing.
-    local saveButton = AddBarButton(frame, TEXT.ADD_LABEL, function() frame:SaveForm() end)
-    local newButton = AddBarButton(frame, TEXT.NEW_LABEL, function() frame:NewReminder() end)
-    local deleteButton = createDeleteButton(frame)
-    local status = createStatus(frame, deleteButton, newButton)
-    local deleteDialog = createDeleteDialog()
-
-    hookBarTip(saveButton, function()
-        if selected then return SAVE, "Keeps your changes to this reminder.", TEXT.INCOMPLETE_TIP end
-        return TEXT.ADD_LABEL, "Adds the reminder to the list on the left.", TEXT.INCOMPLETE_TIP
-    end)
-    hookBarTip(newButton, function()
-        return TEXT.NEW_LABEL, "Empties the editor for a new reminder. Changes to the one shown are kept.",
-            "The editor already shows a new reminder."
-    end)
-    hookBarTip(deleteButton, function()
-        return DELETE, "Removes the reminder shown in the editor, after asking.", "Click a reminder on the left first."
-    end)
-    local showTip, retireTip = AttachTip(saveButton, TEXT.TIP_TEXT, HelpTip.Point.RightEdgeCenter)
-    frame.showTip = showTip
-
-    frame.kindRadios, frame.outputRadios, frame.dayChecks = kindRadios, outputRadios, dayChecks
-    frame.repeatChecks = { timer = timerRepeat, zone = zoneRepeat }
-    frame.localCheck, frame.preview, frame.deleteDialog, frame.status = localCheck, preview, deleteDialog, status
-
-    -- The trigger decides which fields show. A countdown has Repeat beside its value, a time of day
-    -- Use Local Time and the weekdays, a zone the Current Zone button and Every Time.
-    local function layoutWhen()
-        local isTimer, isClock, isZone = form.kind == "timer", form.kind == "clock", form.kind == "zone"
-        local top = 0
-        placeSlot(kindSlot, whenBody, top)
-        top = top + ROW + GAP
-
-        placeSlot(valueSlot, whenBody, top)
-        valueBox:ClearAllPoints()
-        valueBox:SetPoint("LEFT", INPUT_CAP, 0)
-        if isZone then
-            valueBox:SetPoint("RIGHT", hereButton, "LEFT", -GAP, 0)
-        else
-            valueBox:SetPoint("RIGHT", valueSlot, "LEFT", HALF_W, 0)
-        end
-        hereButton:SetShown(isZone)
-        timerRepeat:SetShown(isTimer)
-        localCheck:SetShown(isClock)
-        top = top + ROW + GAP
-
-        daysSlot:SetShown(isClock)
-        zoneSlot:SetShown(isZone)
-        if isClock then
-            placeSlot(daysSlot, whenBody, top)
-            top = top + DAYS_H + GAP
-        elseif isZone then
-            placeSlot(zoneSlot, whenBody, top)
+    -- The trigger decides which fields show. A countdown has Repeat, a time of day Use Local Time and the
+    -- weekdays, a zone Every Time and the Current Zone button. None shows only its preview line.
+    function when:Layout(kind)
+        local isNone, isClock, isZone = kind == "none", kind == "clock", kind == "zone"
+        self.valueBox:SetShown(not isNone)
+        local top = ROW + GAP
+        optionSlot:SetShown(not isNone)
+        if not isNone then
+            placeSlot(optionSlot, body, top)
+            self.timerRepeat:SetShown(kind == "timer")
+            self.localCheck:SetShown(isClock)
+            self.zoneRepeat:SetShown(isZone)
+            self.hereButton:SetShown(isZone)
             top = top + ROW + GAP
         end
-
-        preview:ClearAllPoints()
-        preview:SetPoint("TOPLEFT", whenBody, "TOPLEFT", 0, -top)
-        preview:SetPoint("TOPRIGHT", whenBody, "TOPRIGHT", 0, -top)
-        setBodyHeight(whenSection, top + PREVIEW_H)
+        daysSlot:SetShown(isClock)
+        if isClock then
+            placeSlot(daysSlot, body, top)
+            top = top + DAYS_H + GAP
+        end
+        self.preview:ClearAllPoints()
+        self.preview:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
+        self.preview:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
+        top = top + PREVIEW_H
+        sendSlot:SetShown(not isNone)
+        if not isNone then
+            placeSlot(sendSlot, body, top + GAP)
+            top = top + GAP + ROW
+        end
+        self:SetHeight(SECTION_BODY_TOP + top)
     end
+
+    return when
+end
+
+local function buildPanel()
+    local frame = CreateWindow("RemindMeFrame", ns.title, ns.ICON, PANEL_W, PANEL_H, RemindMeDB.window)
+    local left, right = createColumns(frame)
+    createAtticHelp(frame)
+
+    -- selected is the stored reminder the detail shows, nil while it shows none. The form holds its picks;
+    -- every change saves at once.
+    local form = picksOf({ kind = "none", output = ns.DEFAULT_OUTPUT, body = "note", items = {} })
+    local selected
+
+    -- Reminders list: rows by list place, made on first need and hidden past the end of the list.
+    local scroll = createListScroll(left)
+    local emptyList = CreateEmptyState(left, TEXT.EMPTY_LIST)
+    local rows, shownRows = {}, 0
+
+    -- The detail spans the right column inside its padding, and says what to do while no reminder is picked.
+    local editor = CreateFrame("Frame", nil, right)
+    editor:SetPoint("TOPLEFT", PADDING, -PADDING)
+    editor:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    local emptyEditor = CreateEmptyState(right)
+
+    -- The title, the edit box's art inset by its cap on both sides.
+    local titleBox = CreateHintBox(editor, TEXT.TITLE_HINT)
+    titleBox:SetMaxLetters(ns.MAX_LETTERS)
+    titleBox:SetPoint("TOPLEFT", INPUT_CAP, -(ROW - 20) / 2)
+    titleBox:SetPoint("TOPRIGHT", -INPUT_CAP, -(ROW - 20) / 2)
+    hookTip(titleBox, TEXT.TITLE_HINT, TEXT.TITLE_TIP)
+
+    -- Note or Checklist, a gap under the title.
+    local bodySlot = createSlot(editor, ROW)
+    placeSlot(bodySlot, editor, ROW + GAP)
+    local bodyRadios = createRadioRow(bodySlot, ns.BODIES, ns.BODY_LABELS, TEXT.BODY_TIPS)
+
+    -- When, held to the detail's bottom; the note or checklist fills the space above it down to a section
+    -- break, so it grows while the trigger needs fewer fields.
+    local when = createWhen(editor)
+    local valueBox, preview = when.valueBox, when.preview
+    local timerRepeat, localCheck, zoneRepeat = when.timerRepeat, when.localCheck, when.zoneRepeat
+    local dayChecks, outputRadios = when.dayChecks, when.outputRadios
+
+    local note = CreateNoteBox(editor, TEXT.NOTE_HINT, BODY_W - 2 * INPUT_CAP, ns.MAX_LETTERS)
+    note:SetPoint("TOPLEFT", INPUT_CAP, -(CONTENT_TOP + INPUT_CAP))
+    note:SetPoint("BOTTOMRIGHT", when, "TOPRIGHT", -INPUT_CAP, SECTION_GAP + INPUT_CAP)
+
+    local checklist = CreateScroll(editor)
+    checklist:SetPoint("TOPLEFT", 0, -CONTENT_TOP)
+    checklist:SetPoint("BOTTOMRIGHT", when, "TOPRIGHT", -SCROLL_GUTTER, SECTION_GAP)
+    checklist.content:SetWidth(BODY_W - SCROLL_GUTTER)
+    local itemRows = {}
+
+    HookTooltip(valueBox, function(tooltip)
+        GameTooltip_SetTitle(tooltip, ns.KIND_LABELS[form.kind])
+        GameTooltip_AddNormalLine(tooltip, TEXT.VALUE_TIPS[form.kind], true)
+    end)
+
+    local newButton = AddBarButton(frame, TEXT.NEW_LABEL, function() frame:NewReminder() end)
+    local deleteButton = AddBarButtonLeft(frame, DELETE, function() frame:DeleteSelected() end)
+    local deleteDialog = createDeleteDialog()
+    hookBarTip(newButton, TEXT.NEW_LABEL, "Adds a reminder and opens it here.")
+    hookBarTip(deleteButton, DELETE, "Removes the reminder shown here, after asking.", "Pick a reminder on the left first.")
+    local showTip, retireTip = AttachTip(newButton, TEXT.TIP_TEXT, HelpTip.Point.RightEdgeCenter)
+    frame.showTip = showTip
 
     -- The trigger as a spec, or nil and the problem. An empty value is no problem yet, only unfinished.
     local function readWhen()
+        if form.kind == "none" then return { kind = "none" } end
         local value = ns.trim(valueBox:GetText())
         if value == "" then return nil end
-        local spec = { kind = form.kind, output = form.output, rep = form.rep }
+        local spec = { kind = form.kind, rep = form.rep }
         if form.kind == "timer" then
             spec.seconds = Time.ParseDuration(value)
             if not spec.seconds then return nil, ns.NEED_DURATION end
@@ -875,204 +956,248 @@ local function buildPanel()
         return spec
     end
 
-    -- The whole form as a spec Add and Update take, or nil while the message or the value is missing.
-    local function readForm()
-        local spec = readWhen()
-        if not spec or ns.trim(textBox:GetText()) == "" then return nil end
-        spec.text = textBox:GetText()
-        return spec
+    -- Every change saves the whole form. An unfinished trigger keeps the stored one until it reads.
+    local function commit()
+        if not selected then return end
+        local spec = readWhen() or triggerOf(selected)
+        spec.output = form.output
+        spec.title = titleBox:GetText()
+        spec.body = form.body
+        spec.note = note.EditBox:GetText()
+        spec.items = form.items
+        Reminders.Update(selected, spec)
     end
 
-    -- The preview says what the trigger will do as it is typed, and the primary button waits until the
-    -- form is complete, as Send Mail's Send does (SendMailFrame_CanSend).
+    -- The preview says what the trigger will do as it is typed.
     local function refreshForm()
         local spec, problem = readWhen()
-        if spec then
+        if spec and spec.kind ~= "none" then
             preview:SetText(describeNext(spec))
         elseif problem then
             preview:SetText(RED_FONT_COLOR:WrapTextInColorCode(problem))
         else
             preview:SetText(GRAY_FONT_COLOR:WrapTextInColorCode(TEXT.PREVIEW_HINTS[form.kind]))
         end
-        saveButton:SetEnabled(readForm() ~= nil)
     end
 
-    -- The radios and checkboxes show the picks and the editor shows the fields of the current trigger.
+    -- The checklist's rows follow the form's items, with the add row after the last.
+    local function itemRow(index)
+        local row = itemRows[index]
+        if row then return row end
+        row = createItemRow(checklist.content, index)
+        row.check:SetScript("OnClick", function(check)
+            form.items[row.index].done = check:GetChecked()
+            styleItem(row, form.items[row.index])
+            commit()
+        end)
+        row.remove:SetScript("OnClick", function()
+            table.remove(form.items, row.index)
+            frame:RenderItems()
+            commit()
+        end)
+        -- Typing in the add row makes it an item and opens a new add row under it.
+        row.box:HookScript("OnTextChanged", function(box, userInput)
+            if not userInput then return end
+            local item = form.items[row.index]
+            if item then
+                item.text = box:GetText()
+            elseif box:GetText() ~= "" then
+                form.items[row.index] = { text = box:GetText(), done = false }
+                styleItem(row, form.items[row.index])
+                local addRow = itemRow(row.index + 1)
+                addRow.box:SetText("")
+                styleItem(addRow, nil)
+                addRow:Show()
+                checklist.content:SetHeight(#form.items * ITEM_PITCH + ROW)
+            end
+            commit()
+        end)
+        -- Enter and Tab move to the next row, the last row lets go of the keyboard.
+        local function nextRow()
+            local after = itemRows[row.index + 1]
+            if after and after:IsShown() then
+                after.box:SetFocus()
+                Reveal(checklist, row.index * ITEM_PITCH, row.index * ITEM_PITCH + ROW)
+            else
+                row.box:ClearFocus()
+            end
+        end
+        row.box:SetScript("OnEnterPressed", nextRow)
+        row.box:SetScript("OnTabPressed", nextRow)
+        itemRows[index] = row
+        return row
+    end
+
+    function frame:RenderItems()
+        local count = #form.items
+        for i = 1, count + 1 do
+            local row = itemRow(i)
+            row.box:SetText(form.items[i] and form.items[i].text or "")
+            row.box:SetCursorPosition(0)
+            styleItem(row, form.items[i])
+            row:Show()
+        end
+        for i = count + 2, #itemRows do itemRows[i]:Hide() end
+        checklist.content:SetHeight(count * ITEM_PITCH + ROW)
+    end
+
+    -- The radios, checkboxes and dropdown show the picks, and the detail the fields they need.
     local function showPicks()
-        for kind, radio in pairs(kindRadios) do radio:SetChecked(kind == form.kind) end
+        for body, radio in pairs(bodyRadios) do radio:SetChecked(body == form.body) end
         for output, radio in pairs(outputRadios) do radio:SetChecked(output == form.output) end
         timerRepeat:SetChecked(form.rep)
         zoneRepeat:SetChecked(form.rep)
         localCheck:SetChecked(not form.realm)
         for wday, check in pairs(dayChecks) do check:SetChecked(form.days[wday] == true) end
-        valueBox.Instructions:SetText(TEXT.VALUE_HINTS[form.kind])
-        layoutWhen()
+        valueBox.Instructions:SetText(TEXT.VALUE_HINTS[form.kind] or "")
+        note:SetShown(form.body == "note")
+        checklist:SetShown(form.body == "checklist")
+        when:Layout(form.kind)
         refreshForm()
     end
 
-    function frame:RefreshStatus()
-        if notice then
-            status:SetText(noticeColor:WrapTextInColorCode(notice))
-            return
-        end
-        local sorted = Reminders.Sorted()
-        if #sorted == 0 then
-            status:SetText(GRAY_FONT_COLOR:WrapTextInColorCode("No reminders yet"))
-            return
-        end
-        local text = ns.countLabel(#sorted, "reminder", "reminders")
-        local nextUp = sorted[1]
-        if nextUp.due then
-            text = text .. ", next " .. GREEN_FONT_COLOR:WrapTextInColorCode("in " .. Time.FormatLeft(nextUp.due - GetServerTime()))
-        end
-        status:SetText(text)
-    end
-
-    local function setNotice(message, color)
-        notice, noticeColor = message, color
-        frame:RefreshStatus()
-    end
-
-    local function clearNotice()
-        if notice then setNotice(nil) end
-    end
-
-    -- The attic, the bar buttons and the row bars follow the editor's mode.
+    -- The detail shows while a reminder is picked, the empty line otherwise, and the picked row is lit.
     local function refreshMode()
-        help:SetText(selected and TEXT.HELP_EDIT or TEXT.HELP_NEW)
-        saveButton:SetText(selected and SAVE or TEXT.ADD_LABEL)
-        newButton:SetEnabled(selected ~= nil)
+        editor:SetShown(selected ~= nil)
+        emptyEditor:SetShown(selected == nil)
+        emptyEditor:SetText(shownRows == 0 and TEXT.EMPTY_FIRST or TEXT.EMPTY_PICK)
         deleteButton:SetEnabled(selected ~= nil)
-        for i = 1, shownRows do rows[i].selected:SetShown(rows[i].reminder == selected) end
+        for i = 1, shownRows do rows[i]:SetSelected(rows[i].reminder == selected) end
     end
 
     local function clearFocus()
-        textBox:ClearFocus()
+        titleBox:ClearFocus()
+        note.EditBox:ClearFocus()
         valueBox:ClearFocus()
+        for _, row in ipairs(itemRows) do row.box:ClearFocus() end
     end
 
-    -- Like the macro window, leaving a reminder keeps what was changed in it, as long as it reads.
-    local function commit()
-        local spec = selected and readForm()
-        if spec then Reminders.Update(selected, spec) end
+    -- A reminder New Reminder made goes again when it is left without a word in it.
+    local function leave()
+        if selected and isEmpty(selected) then Reminders.Remove(selected) end
     end
 
-    -- Countdowns tick down in place, without rebuilding the rows.
+    -- Countdowns tick down in place, without measuring the rows again.
     function frame:RefreshTimes()
         local now = GetServerTime()
         for i = 1, shownRows do
             rows[i].detail:SetText(Reminders.Detail(rows[i].reminder, now))
         end
-        self:RefreshStatus()
         refreshForm()
+    end
+
+    -- Each row is as tall as its title wraps, plus the muted line when it has one.
+    local _, detailHeight = GameFontDisable:GetFont()
+    local function fillRow(row, r, now)
+        row.reminder = r
+        row.name:SetText(r.title ~= "" and r.title or GRAY_FONT_COLOR:WrapTextInColorCode(ns.UNTITLED))
+        local nameHeight = math.ceil(row.name:GetStringHeight())
+        row.name:SetHeight(nameHeight)
+        local detail = Reminders.Detail(r, now)
+        row.detail:SetText(detail)
+        row.detail:SetShown(detail ~= "")
+        local height = ROW_PAD + nameHeight + ROW_PAD
+        if detail ~= "" then height = height + TIGHT + math.ceil(detailHeight) end
+        row:SetHeight(height)
     end
 
     function frame:RefreshList()
         local sorted = Reminders.Sorted()
-        empty:SetShown(#sorted == 0)
+        local now = GetServerTime()
+        emptyList:SetShown(#sorted == 0)
+        local top = 0
         for i, r in ipairs(sorted) do
-            rows[i] = rows[i] or createRow(listSection.body, i, function(picked) frame:Select(picked) end)
-            rows[i].reminder = r
-            rows[i].name:SetText(r.text)
-            rows[i]:Show()
+            local row = rows[i]
+            if not row then
+                row = CreateListRow(scroll.content, LIST_W - 2 * LIST_INDENT)
+                row:SetScript("OnClick", function() frame:Select(row.reminder) end)
+                rows[i] = row
+            end
+            fillRow(row, r, now)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 0, -top)
+            row:SetPoint("TOPRIGHT", 0, -top)
+            row.top = top
+            row:Show()
+            top = top + row:GetHeight() + LIST_GAP
         end
         for i = #sorted + 1, #rows do
             rows[i]:Hide()
             rows[i].reminder = nil
         end
         shownRows = #sorted
-        setBodyHeight(listSection, #sorted > 0 and #sorted * LIST_PITCH - (LIST_PITCH - LIST_ROW) or 0)
 
-        -- A reminder that fired once or was removed by command leaves the editor. Its fields stay,
-        -- so Add Reminder can bring it back.
+        -- A reminder removed by command or by Delete leaves the detail.
         if selected and not tContains(sorted, selected) then selected = nil end
         refreshMode()
 
         -- The scroll child follows the list, and the offset comes back into range when it shrinks.
-        scroll.content:SetHeight(listSection:GetHeight())
+        scroll.content:SetHeight(math.max(top - LIST_GAP, 1))
         scroll:UpdateScrollChildRect()
         scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
-        self:RefreshTimes()
+        refreshForm()
     end
 
-    -- Loads a stored reminder into the editor, after keeping the changes to the one shown before.
+    -- Scrolls the list to the picked reminder's row.
+    local function revealSelected()
+        for i = 1, shownRows do
+            local row = rows[i]
+            if row.reminder == selected then Reveal(scroll, row.top, row.top + row:GetHeight()) end
+        end
+    end
+
+    -- Shows a stored reminder in the detail, after letting go of an empty one left behind.
     function frame:Select(r)
         if r == selected then return end
-        commit()
+        clearFocus()
+        leave()
         selected = r
         form = picksOf(r)
-        textBox:SetText(r.text)
-        if r.kind == "timer" then
-            valueBox:SetText(Time.FormatDuration(r.seconds))
-        elseif r.kind == "clock" then
-            valueBox:SetText(Time.FormatClockField(r.hour, r.minute))
-        else
-            valueBox:SetText(r.zone)
-        end
-        textBox:SetCursorPosition(0)
+        titleBox:SetText(r.title)
+        note.EditBox:SetText(r.note)
+        valueBox:SetText(valueOf(r))
+        titleBox:SetCursorPosition(0)
         valueBox:SetCursorPosition(0)
-        clearFocus()
-        clearNotice()
+        self:RenderItems()
+        when.kindDropdown:GenerateMenu()
+        note:SetVerticalScroll(0)
+        checklist:SetVerticalScroll(0)
         showPicks()
         refreshMode()
+        revealSelected()
     end
 
-    -- Empties the editor for a new reminder with the default picks, after keeping the changes to the
-    -- reminder shown before.
-    function frame:NewReminder()
-        commit()
+    -- Loads the picked reminder again from what is stored, when the window opens or after it fired.
+    function frame:Reload(fired)
+        local r = selected
+        if not r or (fired and fired ~= r) then return end
         selected = nil
-        form = newPicks()
-        textBox:SetText("")
-        valueBox:SetText("")
-        clearNotice()
-        showPicks()
-        refreshMode()
-        textBox:SetFocus()
+        self:Select(r)
+    end
+
+    -- Adds a reminder without a trigger and puts the keyboard in its title. An empty one already picked is
+    -- used as it is.
+    function frame:NewReminder()
+        retireTip()
+        if not (selected and isEmpty(selected)) then
+            self:Select(Reminders.Add({ title = "", kind = "none", output = ns.DEFAULT_OUTPUT }))
+        end
+        titleBox:SetFocus()
     end
 
     function frame:DeleteSelected()
         if not selected then return end
         deleteDialog.reminder = selected
-        deleteDialog.subject:SetText(selected.text)
+        deleteDialog.subject:SetText(Reminders.Name(selected))
         deleteDialog:Show()
     end
 
-    -- Removes the reminder the dialog names, even if another was picked meanwhile. Only the removed
-    -- one's editor empties, and nothing is kept from it.
+    -- Removes the reminder the dialog names, even if another was picked meanwhile.
     function frame:ConfirmDelete()
         local r = deleteDialog.reminder
         deleteDialog.reminder = nil
         deleteDialog:Hide()
-        if not r then return end
-        local wasSelected = r == selected
-        if wasSelected then selected = nil end
-        Reminders.Remove(r)
-        if wasSelected then self:NewReminder() end
-    end
-
-    -- A new reminder empties the fields and keeps the picks, so several similar ones go in quickly.
-    -- A saved one stays selected. An incomplete form only moves the caret to the first field to
-    -- finish, since the preview already names any problem.
-    function frame:SaveForm()
-        local spec = readForm()
-        if not spec then
-            local box = ns.trim(textBox:GetText()) == "" and textBox or valueBox
-            box:SetFocus()
-            return
-        end
-        if selected then
-            if not Reminders.Update(selected, spec) then return end
-            clearFocus()
-            setNotice("Saved.", GREEN_FONT_COLOR)
-            return
-        end
-        if not Reminders.Add(spec) then return end
-        retireTip()
-        textBox:SetText("")
-        valueBox:SetText("")
-        clearFocus()
-        setNotice("Added.", GREEN_FONT_COLOR)
+        if r then Reminders.Remove(r) end
     end
 
     -- A trigger change empties the value, which means something else under each trigger.
@@ -1081,90 +1206,109 @@ local function buildPanel()
             form.kind, form.rep, form.days = kind, false, {}
             valueBox:SetText("")
         end
-        clearNotice()
         showPicks()
+        commit()
     end
 
+    when.kindDropdown:SetupMenu(function(_, rootDescription)
+        for _, kind in ipairs(ns.KINDS) do
+            local radio = rootDescription:CreateRadio(ns.KIND_LABELS[kind], function() return form.kind == kind end, function()
+                setKind(kind)
+            end)
+            radio:SetTooltip(function(tooltip)
+                GameTooltip_SetTitle(tooltip, ns.KIND_LABELS[kind])
+                GameTooltip_AddNormalLine(tooltip, TEXT.KIND_TIPS[kind], true)
+            end)
+        end
+    end)
+
     -- A click on a radio picks it, and showPicks checks it again even when it was picked already.
-    for kind, radio in pairs(kindRadios) do
-        radio:SetScript("OnClick", function() setKind(kind) end)
+    for body, radio in pairs(bodyRadios) do
+        radio:SetScript("OnClick", function()
+            form.body = body
+            showPicks()
+            commit()
+        end)
     end
     for output, radio in pairs(outputRadios) do
         radio:SetScript("OnClick", function()
             form.output = output
-            clearNotice()
             showPicks()
+            commit()
         end)
     end
 
     local function onRepeat(check)
         form.rep = check:GetChecked()
-        clearNotice()
         showPicks()
+        commit()
     end
     timerRepeat:SetScript("OnClick", onRepeat)
     zoneRepeat:SetScript("OnClick", onRepeat)
 
     localCheck:SetScript("OnClick", function(check)
         form.realm = not check:GetChecked()
-        clearNotice()
         refreshForm()
+        commit()
     end)
 
     for wday, check in pairs(dayChecks) do
         check:SetScript("OnClick", function()
             form.days[wday] = check:GetChecked() or nil
-            clearNotice()
             refreshForm()
+            commit()
         end)
     end
 
-    testButton:SetScript("OnClick", function()
-        local text = ns.trim(textBox:GetText())
-        Reminders.Preview(form.output, text ~= "" and text or "This is how your reminder arrives.")
+    when.testButton:SetScript("OnClick", function()
+        local title = ns.trim(titleBox:GetText())
+        Reminders.Preview(form.output, title ~= "" and title or ns.UNTITLED)
     end)
 
-    hereButton:SetScript("OnClick", function()
+    when.hereButton:SetScript("OnClick", function()
         valueBox:SetText(GetZoneText())
         valueBox:SetCursorPosition(0)
-        clearNotice()
+        refreshForm()
+        commit()
     end)
 
-    deleteButton:SetScript("OnClick", function() frame:DeleteSelected() end)
     deleteDialog.deleteButton:SetScript("OnClick", function() frame:ConfirmDelete() end)
 
-    -- Enter in the text moves on to an empty value, otherwise both fields save. Tab swaps them.
-    textBox:SetScript("OnEnterPressed", function()
-        if ns.trim(valueBox:GetText()) == "" then valueBox:SetFocus() else frame:SaveForm() end
-    end)
-    valueBox:SetScript("OnEnterPressed", function() frame:SaveForm() end)
-    textBox:SetScript("OnTabPressed", function() valueBox:SetFocus() end)
-    valueBox:SetScript("OnTabPressed", function() textBox:SetFocus() end)
-
-    -- Hooked, so the template's own handler keeps hiding the hint while there is text. Every change
-    -- updates the preview and the primary button, and typing clears the notice.
-    local function onTextChanged(_, userInput)
-        if userInput then clearNotice() end
-        refreshForm()
+    -- Enter or Tab in the title moves on to the note or the checklist's add row.
+    local function toContent()
+        if form.body == "note" then
+            note.EditBox:SetFocus()
+        else
+            local index = #form.items + 1
+            itemRows[index].box:SetFocus()
+            Reveal(checklist, (index - 1) * ITEM_PITCH, (index - 1) * ITEM_PITCH + ROW)
+        end
     end
-    textBox:HookScript("OnTextChanged", onTextChanged)
-    valueBox:HookScript("OnTextChanged", onTextChanged)
+    titleBox:SetScript("OnEnterPressed", toContent)
+    titleBox:SetScript("OnTabPressed", toContent)
+    valueBox:SetScript("OnEnterPressed", valueBox.ClearFocus)
 
-    showPicks()
+    -- Hooked, so the templates' own handlers keep hiding the hints while there is text. Typing saves.
+    local function onTyped(_, userInput)
+        if userInput then commit() end
+    end
+    titleBox:HookScript("OnTextChanged", onTyped)
+    note.EditBox:HookScript("OnTextChanged", onTyped)
+    valueBox:HookScript("OnTextChanged", function(_, userInput)
+        refreshForm()
+        if userInput then commit() end
+    end)
 
-    -- A new reminder takes the keyboard on open, so the message can be typed at once. Escape hands
-    -- it back, a second Escape closes the window.
     local ticker
     frame:SetScript("OnShow", function(self)
-        showPicks()
         self:RefreshList()
+        self:Reload()
         ticker = C_Timer.NewTicker(1, function() self:RefreshTimes() end)
-        if not selected then textBox:SetFocus() end
     end)
     frame:SetScript("OnHide", function()
-        commit()
+        clearFocus()
+        leave()
         ticker:Cancel()
-        notice = nil
         deleteDialog:Hide()
     end)
 
@@ -1180,7 +1324,7 @@ function ns.OpenPanel()
     if not (panel and panel:IsShown()) then ns.TogglePanel() end
 end
 
--- Opens the window with a reminder in the editor, for /rm edit.
+-- Opens the window with a reminder in the detail, for its chat link and /rm edit.
 function ns.EditInPanel(r)
     ns.OpenPanel()
     panel:Select(r)
@@ -1191,7 +1335,10 @@ function ns.ShowTip()
     if panel and panel:IsVisible() then panel.showTip() end
 end
 
--- Called after any change to the reminders, so an open window mirrors them.
-function ns.RefreshPanel()
-    if panel and panel:IsShown() then panel:RefreshList() end
+-- Called after any change to the reminders, so an open window mirrors them. A reminder that fired is loaded
+-- again when it is the one shown, since firing changed its trigger.
+function ns.RefreshPanel(fired)
+    if not (panel and panel:IsShown()) then return end
+    panel:RefreshList()
+    if fired then panel:Reload(fired) end
 end

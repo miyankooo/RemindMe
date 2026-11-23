@@ -41,8 +41,8 @@ local function fillTooltip(tooltip)
         local now = GetServerTime()
         for i = 1, math.min(#sorted, TOOLTIP_LIMIT) do
             local r = sorted[i]
-            local when = r.due and ("in " .. Time.FormatLeft(r.due - now)) or r.zone
-            GameTooltip_AddColoredDoubleLine(tooltip, r.text, when, HIGHLIGHT_FONT_COLOR, GRAY_FONT_COLOR)
+            local when = r.due and ("in " .. Time.FormatLeft(r.due - now)) or (r.kind == "zone" and r.zone) or ""
+            GameTooltip_AddColoredDoubleLine(tooltip, Reminders.Name(r), when, HIGHLIGHT_FONT_COLOR, GRAY_FONT_COLOR)
         end
         if #sorted > TOOLTIP_LIMIT then
             GameTooltip_AddDisabledLine(tooltip, ns.countLabel(#sorted - TOOLTIP_LIMIT, "more reminder", "more reminders") .. ".")

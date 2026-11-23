@@ -28,8 +28,6 @@ local OPTIONS = {
     whisper = setOutput("whisper"),
     print = setOutput("print"),
     chat = setOutput("print"),
-    warning = setOutput("warning"),
-    rw = setOutput("warning"),
     realm = setRealm(true),
     server = setRealm(true),
     ["local"] = setRealm(false),
@@ -46,12 +44,12 @@ for wday, name in ipairs(CALENDAR_WEEKDAY_NAMES) do
 end
 
 local USAGE = {
-    timer = "/rm in 30m <text>",
-    clock = "/rm at 20:30 <text>",
-    zone = "/rm zone Stormwind City: <text>",
+    timer = "/rm in 30m <title>",
+    clock = "/rm at 20:30 <title>",
+    zone = "/rm zone Stormwind City: <title>",
 }
 
--- Reads the options after the trigger, then the text, and stores the reminder.
+-- Reads the options after the trigger, then the title, and stores the reminder.
 local function addFrom(spec, words, i)
     while words[i] and OPTIONS[strlower(words[i])] do
         OPTIONS[strlower(words[i])](spec)
@@ -66,7 +64,11 @@ local function addFrom(spec, words, i)
         if spec.rep ~= true then spec.rep = spec.days end
         spec.days = nil
     end
-    spec.text = table.concat(words, " ", i)
+    spec.title = ns.trim(table.concat(words, " ", i))
+    if spec.title == "" then
+        ns.Print(ns.NEED_TITLE .. " " .. USAGE[spec.kind])
+        return
+    end
     local r, problem = Reminders.Add(spec)
     if not r then
         ns.Print(problem .. " " .. USAGE[spec.kind])
@@ -136,7 +138,7 @@ local function removeAt(word)
     local r = pick(word)
     if not r then return end
     Reminders.Remove(r)
-    ns.Print("Removed: " .. r.text .. ".")
+    ns.Print("Removed: " .. Reminders.Name(r) .. ".")
 end
 
 local function editAt(word)
@@ -146,7 +148,7 @@ end
 
 local function testAt(word)
     local r = pick(word)
-    if r then Reminders.Preview(r.output, r.text) end
+    if r then Reminders.Preview(r.output, Reminders.Name(r)) end
 end
 
 local function clear()
@@ -159,11 +161,11 @@ local function clear()
 end
 
 -- Every command in one line, in the order a new player needs them, then the options.
-local HELP = "Type /rm to open the window, /rm in 30m <text>, /rm at 20:30 <text> or /rm zone Stormwind City: <text>"
-    .. " to add a reminder, /rm here <text> for the zone you are in, /rm list, /rm edit 2, /rm test 2, /rm remove 2"
+local HELP = "Type /rm to open the window, /rm in 30m <title>, /rm at 20:30 <title> or /rm zone Stormwind City: <title>"
+    .. " to add a reminder, /rm here <title> for the zone you are in, /rm list, /rm edit 2, /rm test 2, /rm remove 2"
     .. " or /rm clear to manage them, /rm intro to see the welcome line and the tip again, /rm minimap to show or"
     .. " hide the minimap button, or /rm help for this list."
-    .. " Options go before the text: whisper, print or warning, repeat, and for /rm at realm or local, daily or"
+    .. " Options go before the title: whisper or chat, repeat, and for /rm at realm or local, daily or"
     .. " weekdays such as monday wednesday."
 
 -- A bare /rm toggles the window, the first word picks the command.
