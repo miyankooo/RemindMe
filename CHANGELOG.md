@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.0](https://github.com/miyankooo/SimpleReminders/compare/v2.0.0...v2.1.0) (2026-11-23)
+
+
+### Features
+
+* Each reminder can be Character Specific, so only the character that ticked it lists it and gets its alert ([630138d](https://github.com/miyankooo/SimpleReminders/commit/630138df0f4598488e19f6407678ef185092e50e))
+* The button bar has room around Delete and New Reminder ([630138d](https://github.com/miyankooo/SimpleReminders/commit/630138df0f4598488e19f6407678ef185092e50e))
+* The window's radios take the round style of Blizzard's dropdown menus ([630138d](https://github.com/miyankooo/SimpleReminders/commit/630138df0f4598488e19f6407678ef185092e50e))
+* Whisper, Chat, Test and Character Specific sit in a new Alert section under When ([630138d](https://github.com/miyankooo/SimpleReminders/commit/630138df0f4598488e19f6407678ef185092e50e))
+
 ## [2.0.0](https://github.com/miyankooo/SimpleReminders/compare/v1.1.0...v2.0.0) (2026-11-23)
 
 
