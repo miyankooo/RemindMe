@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/miyankooo/SimpleReminders/compare/v1.1.0...v2.0.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* The addon folder and its saved data are now SimpleReminders, so the reminder list starts empty. To keep your reminders, copy WTF/Account/<account>/SavedVariables/RemindMe.lua to SimpleReminders.lua and change RemindMeDB to SimpleRemindersDB at its top.
+
+### Features
+
+* The addon is now Simple Reminders, with /sr and /simplereminders beside /rm and /remindme ([bccb8c7](https://github.com/miyankooo/SimpleReminders/commit/bccb8c7903b8dd24387f342ab6dd84fe8876a530))
+
 ## [1.1.0](https://github.com/miyankooo/RemindMe/compare/v1.0.0...v1.1.0) (2026-11-23)
 
 
